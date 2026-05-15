@@ -757,6 +757,22 @@ bot = Bot(token=BOT_TOKEN)
 storage = MemoryStorage()
 dp = Dispatcher(storage=storage)
 router = Router()
+
+# Автоматический callback.answer() через middleware — убирает "часики" на кнопках
+class AutoAnswerMiddleware:
+    async def __call__(self, handler, event, data):
+        try:
+            result = await handler(event, data)
+        finally:
+            if isinstance(event, CallbackQuery):
+                try:
+                    await event.answer()
+                except:
+                    pass
+        return result
+
+router.callback_query.middleware(AutoAnswerMiddleware())
+
 dp.include_router(router)
 
 
@@ -2381,6 +2397,9 @@ async def select_color(callback: CallbackQuery, state: FSMContext):
     await callback.answer(f"✅ Цвет изменён на {color_name}!")
     
     user = await get_user(user_id)
+    if not user:
+        await callback.answer("❌ Нажмите /start сначала!", show_alert=True)
+        return
     await callback.message.edit_text(
         f"✅ Цвет иголок изменён на: {color_name}\n"
         f"💰 Списано 100 Ежидзиков👍",
@@ -2409,6 +2428,9 @@ async def sell_hedgehog(callback: CallbackQuery):
         return
     user_id = callback.from_user.id
     user = await get_user(user_id)
+    if not user:
+        await callback.answer("❌ Нажмите /start сначала!", show_alert=True)
+        return
     cls_data = CLASSES.get(user['hedgehog_class'])
     if not cls_data: return
 
@@ -2436,6 +2458,9 @@ async def finances_menu(callback: CallbackQuery, state: FSMContext):
         return
     
     user = await get_user(callback.from_user.id)
+    if not user:
+        await callback.answer("❌ Нажмите /start сначала!", show_alert=True)
+        return
     is_user_admin = await is_admin(callback.from_user.id)
     status = "👑 Админ" if is_user_admin else "🎮 Игрок"
     
@@ -2622,7 +2647,10 @@ async def ants_menu(callback: CallbackQuery, state: FSMContext):
         return
     
     user = await get_user(callback.from_user.id)
-    ant_chance = user['ant_chance'] if user else 10.0
+    if not user:
+        await callback.answer("❌ Нажмите /start сначала!", show_alert=True)
+        return
+    ant_chance = user['ant_chance']
     
     # Bonus for Ejidze
     if user['hedgehog_class'] == 'ejidze':
@@ -2691,7 +2719,10 @@ async def manage_ants(callback: CallbackQuery):
         return
     
     user = await get_user(callback.from_user.id)
-    ants = user['ants'] if user else 0
+    if not user:
+        await callback.answer("❌ Нажмите /start сначала!", show_alert=True)
+        return
+    ants = user['ants']
     ant_income = int(await get_setting("ant_income", "10"))
     income = ants * ant_income
     
@@ -2791,6 +2822,9 @@ async def exchange_menu(callback: CallbackQuery, state: FSMContext = None):
         return
 
     user = await get_user(callback.from_user.id)
+    if not user:
+        await callback.answer("❌ Нажмите /start сначала!", show_alert=True)
+        return
     
     text = (
         f"🦔♻️ Здесь можно обменять валюту!\n\n"
@@ -2847,6 +2881,9 @@ async def process_exchange_to_balance(callback: CallbackQuery):
 async def diamond_menu(callback: CallbackQuery):
     if not await check_access(bot, callback.from_user.id, callback): return
     user = await get_user(callback.from_user.id)
+    if not user:
+        await callback.answer("❌ Нажмите /start сначала!", show_alert=True)
+        return
     await safe_edit_text(
         callback.message,
         f"💎 МЕНЮ АЛМАЗОВ 💎\n\n"
@@ -2862,6 +2899,9 @@ async def ex_skin_to_dia(callback: CallbackQuery):
     if not await check_access(bot, callback.from_user.id, callback):
         return
     user = await get_user(callback.from_user.id)
+    if not user:
+        await callback.answer("❌ Нажмите /start сначала!", show_alert=True)
+        return
     if user['elephant_skin'] < 3:
         await callback.answer("❌ Нужно 3 Кожи слона!", show_alert=True)
         return
@@ -2879,6 +2919,9 @@ async def ex_dia_to_skin(callback: CallbackQuery):
     if not await check_access(bot, callback.from_user.id, callback):
         return
     user = await get_user(callback.from_user.id)
+    if not user:
+        await callback.answer("❌ Нажмите /start сначала!", show_alert=True)
+        return
     if user['diamonds'] < 1:
         await callback.answer("❌ У тебя нет алмазов!", show_alert=True)
         return
