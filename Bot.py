@@ -5223,6 +5223,10 @@ async def act_balance(callback: CallbackQuery, state: FSMContext):
     user_id = int(callback.data.replace("act_bal_", ""))
     await state.update_data(target_user_id=user_id)
     await state.set_state(AdminStates.waiting_amount)
+    # Отладка — проверить что state реально установился
+    check_state = await state.get_state()
+    check_data = await state.get_data()
+    print(f"[DEBUG] act_balance: set state={check_state}, data={check_data}")
     await callback.answer()
     await callback.message.answer("💰 Введите сумму изменения (+/-):")
 
@@ -5263,44 +5267,53 @@ async def act_sban_books(callback: CallbackQuery):
 
 @router.message(AdminStates.waiting_amount)
 async def process_amount(message: Message, state: FSMContext):
-    if not await is_admin(message.from_user.id):
-        await message.answer("❌ Нет доступа!")
-        await state.clear()
-        return
-    
+    print(f"[DEBUG] process_amount called! text={message.text}, from={message.from_user.id}")
     try:
-        amount = int(message.text)
-    except:
-        await message.answer("❌ Введи число!")
-        return
-    
-    data = await state.get_data()
-    target_user_id = data.get('target_user_id')
-    
-    if not target_user_id:
+        if not await is_admin(message.from_user.id):
+            await message.answer("❌ Нет доступа!")
+            await state.clear()
+            return
+        
+        try:
+            amount = int(message.text)
+        except:
+            await message.answer("❌ Введи число!")
+            return
+        
+        data = await state.get_data()
+        target_user_id = data.get('target_user_id')
+        print(f"[DEBUG] state data: {data}, target_user_id={target_user_id}")
+        
+        if not target_user_id:
+            await state.clear()
+            await message.answer("❌ Ошибка: потерян ID игрока. Попробуй заново через Поиск.")
+            return
+        
+        async with aiosqlite.connect(DB_NAME) as db:
+            await db.execute("UPDATE users SET balance = balance + ? WHERE user_id = ?", (amount, target_user_id))
+            await db.commit()
+        
+        if amount > 0:
+            await add_stat(target_user_id, "balance_add", amount)
+        
+        await add_admin_log(message.from_user.username or "Unknown", "change_balance", f"user {target_user_id}: {amount}")
         await state.clear()
-        await message.answer("❌ Ошибка: потерян ID игрока. Попробуй заново через Поиск.")
-        return
-    
-    print(f"[ADMIN] Balance change: admin={message.from_user.id}, target={target_user_id}, amount={amount}")
-    
-    async with aiosqlite.connect(DB_NAME) as db:
-        await db.execute("UPDATE users SET balance = balance + ? WHERE user_id = ?", (amount, target_user_id))
-        await db.commit()
-    
-    if amount > 0:
-        await add_stat(target_user_id, "balance_add", amount)
-    
-    await add_admin_log(message.from_user.username or "Unknown", "change_balance", f"user {target_user_id}: {amount}")
-    await state.clear()
-    
-    new_balance = await get_balance(target_user_id)
-    await message.answer(
-        f"✅ Баланс изменён!\n\n"
-        f"Изменение: {'+' if amount > 0 else ''}{amount} Ежидзиков👍\n"
-        f"Новый баланс: {new_balance} Ежидзиков👍",
-        reply_markup=admin_main_keyboard()
-    )
+        
+        new_balance = await get_balance(target_user_id)
+        await message.answer(
+            f"✅ Баланс изменён!\n\n"
+            f"Изменение: {'+' if amount > 0 else ''}{amount} Ежидзиков👍\n"
+            f"Новый баланс: {new_balance} Ежидзиков👍",
+            reply_markup=admin_main_keyboard()
+        )
+    except Exception as e:
+        print(f"[ERROR] process_amount crashed: {e}")
+        import traceback
+        traceback.print_exc()
+        try:
+            await message.answer(f"❌ Ошибка: {e}")
+        except:
+            pass
 
 
 # =====================================
