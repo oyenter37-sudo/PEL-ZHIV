@@ -36,7 +36,7 @@ except ImportError:
 # =====================================
 
 BOT_TOKEN = "8914077813:AAE77O2UHuSkA9o7hDjozQH5Pg5yIRvWDd8"
-MAIN_ADMIN_USERNAME = "venter8"
+MAIN_ADMIN_USERNAME = "Nonametipp"
 CHANNEL_ID = -1002483918
 CHANNEL_LINK = "https://t.me/+hGOqFr0HoQM3Mjgy"
 DB_NAME = os.environ.get("DB_NAME", "hedgehog_bot.db")
