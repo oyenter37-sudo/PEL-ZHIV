@@ -5238,6 +5238,9 @@ async def act_ban(callback: CallbackQuery, state: FSMContext):
 async def act_sban_ads(callback: CallbackQuery):
     user_id = int(callback.data.replace("act_sban_ads_", ""))
     user = await get_user(user_id)
+    if not user:
+        await callback.answer("❌ Пользователь не найден!", show_alert=True)
+        return
     new_val = 0 if user['ban_ads'] == 1 else 1
     async with aiosqlite.connect(DB_NAME) as db:
         await db.execute("UPDATE users SET ban_ads = ? WHERE user_id = ?", (new_val, user_id))
@@ -5248,6 +5251,9 @@ async def act_sban_ads(callback: CallbackQuery):
 async def act_sban_books(callback: CallbackQuery):
     user_id = int(callback.data.replace("act_sban_books_", ""))
     user = await get_user(user_id)
+    if not user:
+        await callback.answer("❌ Пользователь не найден!", show_alert=True)
+        return
     new_val = 0 if user['ban_books'] == 1 else 1
     async with aiosqlite.connect(DB_NAME) as db:
         await db.execute("UPDATE users SET ban_books = ? WHERE user_id = ?", (new_val, user_id))
@@ -5258,6 +5264,8 @@ async def act_sban_books(callback: CallbackQuery):
 @router.message(AdminStates.waiting_amount)
 async def process_amount(message: Message, state: FSMContext):
     if not await is_admin(message.from_user.id):
+        await message.answer("❌ Нет доступа!")
+        await state.clear()
         return
     
     try:
@@ -5271,8 +5279,10 @@ async def process_amount(message: Message, state: FSMContext):
     
     if not target_user_id:
         await state.clear()
-        await message.answer("❌ Ошибка! Попробуй заново.")
+        await message.answer("❌ Ошибка: потерян ID игрока. Попробуй заново через Поиск.")
         return
+    
+    print(f"[ADMIN] Balance change: admin={message.from_user.id}, target={target_user_id}, amount={amount}")
     
     async with aiosqlite.connect(DB_NAME) as db:
         await db.execute("UPDATE users SET balance = balance + ? WHERE user_id = ?", (amount, target_user_id))
