@@ -17,7 +17,7 @@ from aiogram.types import (
     BufferedInputFile, FSInputFile, InlineQuery, InlineQueryResultArticle, 
     InputTextMessageContent
 )
-from aiogram.filters import CommandStart, Command, CommandObject
+from aiogram.filters import CommandStart, Command, CommandObject, StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.storage.memory import MemoryStorage
@@ -2326,7 +2326,7 @@ async def change_color(callback: CallbackQuery, state: FSMContext):
     )
 
 
-@router.callback_query(F.data.startswith("color_"), ~AdminStates.waiting_promo_value)
+@router.callback_query(F.data.startswith("color_"), ~StateFilter(AdminStates.waiting_promo_value))
 async def select_color(callback: CallbackQuery, state: FSMContext):
     
     if not await check_access(bot, callback.from_user.id, callback):
