@@ -709,12 +709,23 @@ async def ensure_main_admin(username: str):
 # 📢 ПРОВЕРКА ПОДПИСКИ
 # =====================================
 
+_subscription_cache: dict[int, tuple[bool, datetime]] = {}
+_SUB_CACHE_TTL = timedelta(minutes=5)
+
 async def check_subscription(bot_instance: Bot, user_id: int) -> bool:
+    now = datetime.now()
+    cached = _subscription_cache.get(user_id)
+    if cached:
+        value, cached_time = cached
+        if now - cached_time < _SUB_CACHE_TTL:
+            return value
     try:
         member = await bot_instance.get_chat_member(CHANNEL_ID, user_id)
-        return member.status in [ChatMemberStatus.MEMBER, ChatMemberStatus.ADMINISTRATOR, ChatMemberStatus.CREATOR]
+        result = member.status in [ChatMemberStatus.MEMBER, ChatMemberStatus.ADMINISTRATOR, ChatMemberStatus.CREATOR]
     except:
-        return True
+        result = True
+    _subscription_cache[user_id] = (result, now)
+    return result
 
 
 # =====================================
@@ -1816,6 +1827,9 @@ async def process_buy_class(callback: CallbackQuery):
     cls_data = CLASSES.get(cls_key)
     user_id = callback.from_user.id
     user = await get_user(user_id)
+    if not user:
+        await callback.answer("❌ Нажмите /start сначала!", show_alert=True)
+        return
     
     if not cls_data: return
     
@@ -1881,6 +1895,9 @@ async def reply_my_hedgehog(message: Message, state: FSMContext):
         return
     
     user = await get_user(message.from_user.id)
+    if not user:
+        await message.answer("❌ Вы не зарегистрированы! Нажмите /start")
+        return
     join_date = datetime.strptime(user['join_date'], "%Y-%m-%d %H:%M:%S")
     days_in_bot = (datetime.now() - join_date).days
     injured_text = "\n\n🩹 Твоя рука поранена! Купи аптечку в магазине!" if user['is_injured'] else ""
@@ -1910,6 +1927,9 @@ async def reply_finances(message: Message, state: FSMContext):
         return
     
     user = await get_user(message.from_user.id)
+    if not user:
+        await message.answer("❌ Вы не зарегистрированы! Нажмите /start")
+        return
     is_user_admin = await is_admin(message.from_user.id)
     status = "👑 Админ" if is_user_admin else "🎮 Игрок"
     
@@ -2073,6 +2093,9 @@ async def feed_menu(callback: CallbackQuery, state: FSMContext):
         return
     
     user = await get_user(callback.from_user.id)
+    if not user:
+        await callback.answer("❌ Нажмите /start сначала!", show_alert=True)
+        return
     
     await safe_edit_text(
         callback.message,
@@ -2096,11 +2119,14 @@ async def do_feed_item(callback: CallbackQuery):
     
     user_id = callback.from_user.id
     user = await get_user(user_id)
+    if not user:
+        await callback.answer("❌ Нажмите /start сначала!", show_alert=True)
+        return
     balance = user['balance']
     current_sat = user['satiety']
     
     cls_data = CLASSES.get(user['hedgehog_class'])
-    max_sat = cls_data['max_satiety']
+    max_sat = cls_data['max_satiety'] if cls_data else 100
     
     if balance < price:
         await callback.answer(f"❌ Нужно {price} Ежидзиков!", show_alert=True)
@@ -2159,6 +2185,9 @@ async def pet_menu(callback: CallbackQuery, state: FSMContext):
         return
     
     user = await get_user(callback.from_user.id)
+    if not user:
+        await callback.answer("❌ Нажмите /start сначала!", show_alert=True)
+        return
     
     if user['is_injured']:
         await safe_edit_text(
@@ -2171,7 +2200,7 @@ async def pet_menu(callback: CallbackQuery, state: FSMContext):
         )
         return
     
-    happiness = user['happiness'] if user else 0
+    happiness = user['happiness']
     
     await safe_edit_text(
         callback.message,
@@ -2191,6 +2220,9 @@ async def do_pet(callback: CallbackQuery):
     
     user_id = callback.from_user.id
     user = await get_user(user_id)
+    if not user:
+        await callback.answer("❌ Нажмите /start сначала!", show_alert=True)
+        return
     
     if user['is_injured']:
         await callback.answer("🩹 Сначала вылечи руку!", show_alert=True)
@@ -4554,8 +4586,7 @@ async def process_support_message(message: Message, state: FSMContext):
         reply_markup=main_menu_keyboard(is_user_admin)
     )
     
-    # Bugfix return markup
-    return main_menu_keyboard(is_user_admin)
+    # Bugfix return markup - removed dead return
 
 
 @router.callback_query(F.data == "write_suggestion")
