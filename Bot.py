@@ -21,7 +21,7 @@ from aiogram.filters import CommandStart, Command, CommandObject, StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.storage.memory import MemoryStorage
-from aiogram.enums import ChatMemberStatus
+from aiogram.enums import ChatMemberStatus, ButtonStyle
 
 # Попытка импорта Pillow для Image Test
 try:
@@ -837,22 +837,24 @@ class AdminStates(StatesGroup):
 
 def main_reply_keyboard(is_admin: bool = False, is_fake_admin: bool = False):
     buttons = [
+        [KeyboardButton(text="🏠 Меню", style=ButtonStyle.PRIMARY)],
         [KeyboardButton(text="🦔 Мой Ёж"), KeyboardButton(text="🌟 Финансы")],
         [KeyboardButton(text="🤔 Поддержка"), KeyboardButton(text="🎰 Ежино")],
         [KeyboardButton(text="Image Test")]
     ]
     if is_admin or is_fake_admin:
-        buttons.append([KeyboardButton(text="🛠 Панель")])
+        buttons.append([KeyboardButton(text="🛠 Панель", style=ButtonStyle.DANGER)])
     return ReplyKeyboardMarkup(keyboard=buttons, resize_keyboard=True)
 
 def death_reply_keyboard():
     # Удалена кнопка Рекламы для хардкора в Survival Update
     buttons = [
+        [KeyboardButton(text="🏠 Меню", style=ButtonStyle.PRIMARY)],
         [KeyboardButton(text="🔘 Получить 1 ежидзик за клик 😢")],
         [KeyboardButton(text="🙏 Попросить Денег")],
         [KeyboardButton(text="💰 Баланс")],
-        [KeyboardButton(text="🆕 Купить Ежа")],
-        [KeyboardButton(text="🧪 Dev Test")]
+        [KeyboardButton(text="🆕 Купить Ежа", style=ButtonStyle.SUCCESS)],
+        [KeyboardButton(text="🧪 Dev Test", style=ButtonStyle.DANGER)]
     ]
     return ReplyKeyboardMarkup(keyboard=buttons, resize_keyboard=True)
 
@@ -863,7 +865,7 @@ def death_reply_keyboard():
 def subscription_keyboard():
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="🔗 Подписаться", url=CHANNEL_LINK)],
-        [InlineKeyboardButton(text="✅ Я подписался", callback_data="check_subscription")]
+        [InlineKeyboardButton(text="✅ Я подписался", callback_data="check_subscription", style=ButtonStyle.SUCCESS)]
     ])
 
 
@@ -871,8 +873,8 @@ def main_menu_keyboard(is_admin: bool = False):
     # Обновленный дизайн для Survival v3.8
     buttons = [
         [
-            InlineKeyboardButton(text="🦔Покормить🦔", callback_data="feed"),
-            InlineKeyboardButton(text="🦔Погладить🦔", callback_data="pet")
+            InlineKeyboardButton(text="🦔Покормить🦔", callback_data="feed", style=ButtonStyle.SUCCESS),
+            InlineKeyboardButton(text="🦔Погладить🦔", callback_data="pet", style=ButtonStyle.SUCCESS)
         ],
         [
             InlineKeyboardButton(text="🛒Магазин🛒", callback_data="shop"),
@@ -892,11 +894,11 @@ def main_menu_keyboard(is_admin: bool = False):
         ],
         [
             InlineKeyboardButton(text="👬Пригласить друга👬", callback_data="invite"),
-            InlineKeyboardButton(text="🎁Бонусы🎁", callback_data="bonuses")
+            InlineKeyboardButton(text="🎁Бонусы🎁", callback_data="bonuses", style=ButtonStyle.PRIMARY)
         ]
     ]
     if is_admin:
-        buttons.append([InlineKeyboardButton(text="🛠 Панель", callback_data="admin_panel")])
+        buttons.append([InlineKeyboardButton(text="🛠 Панель", callback_data="admin_panel", style=ButtonStyle.DANGER)])
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 
@@ -912,7 +914,7 @@ def feed_keyboard():
     for idx, (name, price, sati) in enumerate(FOOD_ITEMS):
         buttons.append([InlineKeyboardButton(text=f"{name} ({price}💰) +{sati}%", callback_data=f"feed_item_{idx}")])
     
-    buttons.append([InlineKeyboardButton(text="☢️ Ядерка (♾️)", callback_data="noop")])
+    buttons.append([InlineKeyboardButton(text="☢️ Ядерка (♾️)", callback_data="noop", style=ButtonStyle.DANGER)])
     buttons.append([InlineKeyboardButton(text="Назад ◀️◀️◀️", callback_data="menu")])
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
@@ -933,12 +935,12 @@ def injured_keyboard():
 
 def my_hedgehog_keyboard(h_class: str):
     buttons = [
-        [InlineKeyboardButton(text="🖌️Кастомизировать", callback_data="customize")]
+        [InlineKeyboardButton(text="🖌️Кастомизировать", callback_data="customize", style=ButtonStyle.PRIMARY)]
     ]
     if h_class == 'normal':
         buttons.append([InlineKeyboardButton(text="🤝 Отдать ёжика на хранение", callback_data="store_hedgehog")])
     else:
-        buttons.append([InlineKeyboardButton(text="💸 Продать Ежа", callback_data="sell_hedgehog")])
+        buttons.append([InlineKeyboardButton(text="💸 Продать Ежа", callback_data="sell_hedgehog", style=ButtonStyle.DANGER)])
         
     buttons.append([InlineKeyboardButton(text="Назад ◀️◀️◀️", callback_data="menu")]
                   )
@@ -1024,7 +1026,7 @@ def bonuses_keyboard():
 def support_keyboard(is_main_admin: bool = False):
     buttons = [
         [
-            InlineKeyboardButton(text="🆘 Написать в техподдержку", callback_data="write_support"),
+            InlineKeyboardButton(text="🆘 Написать в техподдержку", callback_data="write_support", style=ButtonStyle.PRIMARY),
             InlineKeyboardButton(text="💫 Предложить обновление", callback_data="write_suggestion")
         ],
         [
@@ -1037,7 +1039,7 @@ def support_keyboard(is_main_admin: bool = False):
         [InlineKeyboardButton(text="🔄 Ресет username", callback_data="reset_username")]
     ]
     if is_main_admin:
-        buttons.append([InlineKeyboardButton(text="☢️ СУПЕР ОЧИСТКА ☢️", callback_data="super_reset")])
+        buttons.append([InlineKeyboardButton(text="☢️ СУПЕР ОЧИСТКА ☢️", callback_data="super_reset", style=ButtonStyle.DANGER)])
     buttons.append([InlineKeyboardButton(text="Назад ◀️◀️◀️", callback_data="menu")]
                   )
     return InlineKeyboardMarkup(inline_keyboard=buttons)
@@ -1069,7 +1071,7 @@ def shop_item_keyboard(item_index: int, total_items: int):
     if nav_buttons:
         buttons.append(nav_buttons)
     
-    buttons.append([InlineKeyboardButton(text="💰 Купить", callback_data=f"buy_item_{item_index}")])
+    buttons.append([InlineKeyboardButton(text="💰 Купить", callback_data=f"buy_item_{item_index}", style=ButtonStyle.SUCCESS)])
     buttons.append([InlineKeyboardButton(text="Назад ◀️◀️◀️", callback_data="shop")])
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
@@ -1133,27 +1135,28 @@ def image_test_keyboard():
 def class_select_keyboard():
     buttons = []
     for cls_key, cls_data in CLASSES.items():
-        buttons.append([InlineKeyboardButton(text=f"{cls_data['name']} - {cls_data['price']} Еж.", callback_data=f"buy_class_{cls_key}")])
+        style = ButtonStyle.SUCCESS if cls_key == 'normal' else ButtonStyle.PRIMARY
+        buttons.append([InlineKeyboardButton(text=f"{cls_data['name']} - {cls_data['price']} Еж.", callback_data=f"buy_class_{cls_key}", style=style)])
     buttons.append([InlineKeyboardButton(text="Назад в посмертие", callback_data="death_menu_back")])
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 def book_menu_keyboard():
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="✍️ Написать книгу", callback_data="write_book")],
+        [InlineKeyboardButton(text="✍️ Написать книгу", callback_data="write_book", style=ButtonStyle.PRIMARY)],
         [InlineKeyboardButton(text="📚 Магазин книг", callback_data="buy_books")],
         [InlineKeyboardButton(text="Назад ◀️◀️◀️", callback_data="shop")]
     ])
 
 def book_buy_keyboard(book_id: int):
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="💰 Купить книгу", callback_data="purchase_book_" + str(book_id))],
+        [InlineKeyboardButton(text="💰 Купить книгу", callback_data="purchase_book_" + str(book_id), style=ButtonStyle.SUCCESS)],
         [InlineKeyboardButton(text="Назад ◀️◀️◀️", callback_data="buy_books")]
     ])
 
 def book_mod_keyboard(book_id: int):
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="✅ Одобрить", callback_data=f"approve_book_{book_id}")],
-        [InlineKeyboardButton(text="❌ Отклонить", callback_data=f"reject_book_{book_id}")]
+        [InlineKeyboardButton(text="✅ Одобрить", callback_data=f"approve_book_{book_id}", style=ButtonStyle.SUCCESS)],
+        [InlineKeyboardButton(text="❌ Отклонить", callback_data=f"reject_book_{book_id}", style=ButtonStyle.DANGER)]
     ])
 
 # =====================================
@@ -1170,7 +1173,7 @@ def casino_keyboard():
             InlineKeyboardButton(text="🎰 Сл0ти|<И", callback_data="casino_slots"),
             InlineKeyboardButton(text="🌟 Найди звезду", callback_data="casino_star")
         ],
-        [InlineKeyboardButton(text="☠️ ×10 от ставки", callback_data="casino_x10")],
+        [InlineKeyboardButton(text="☠️ ×10 от ставки", callback_data="casino_x10", style=ButtonStyle.DANGER)],
         [InlineKeyboardButton(text="Назад ◀️◀️◀️", callback_data="menu")]
     ])
 
@@ -1247,7 +1250,7 @@ def star_field_keyboard(field: list, revealed: list):
 
 def x10_keyboard():
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="☠️ РИСКНУТЬ!", callback_data="x10_try")],
+        [InlineKeyboardButton(text="☠️ РИСКНУТЬ!", callback_data="x10_try", style=ButtonStyle.DANGER)],
         [InlineKeyboardButton(text="Назад ◀️◀️◀️", callback_data="casino")]
     ])
 
@@ -1258,7 +1261,7 @@ def x10_keyboard():
 
 def admin_os_login_keyboard():
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🔓 Войти в систему", callback_data="admin_login_verify")]
+        [InlineKeyboardButton(text="🔓 Войти в систему", callback_data="admin_login_verify", style=ButtonStyle.PRIMARY)]
     ])
 
 def fake_admin_keyboard():
@@ -1282,13 +1285,13 @@ def admin_main_keyboard():
             InlineKeyboardButton(text="📊 Статистика", callback_data="admin_stats"),
             InlineKeyboardButton(text="📜 Логи", callback_data="admin_logs")
         ],
-        [InlineKeyboardButton(text="🔴 Выход", callback_data="menu")]
+        [InlineKeyboardButton(text="🔴 Выход", callback_data="menu", style=ButtonStyle.DANGER)]
     ])
 
 def admin_players_keyboard():
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🔎 Поиск / Действия", callback_data="admin_manage_balance")],
-        [InlineKeyboardButton(text="🚫 Бан-лист", callback_data="admin_banlist")],
+        [InlineKeyboardButton(text="🔎 Поиск / Действия", callback_data="admin_manage_balance", style=ButtonStyle.PRIMARY)],
+        [InlineKeyboardButton(text="🚫 Бан-лист", callback_data="admin_banlist", style=ButtonStyle.DANGER)],
         [InlineKeyboardButton(text="🤡 Фейк Админы", callback_data="admin_manage_fakes")],
         [InlineKeyboardButton(text="✉️ Личное сообщение", callback_data="admin_personal_msg")],
         [InlineKeyboardButton(text="🔙 Назад", callback_data="admin_panel")]
@@ -1296,12 +1299,12 @@ def admin_players_keyboard():
 
 def admin_marketing_keyboard():
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="📢 Рассылка", callback_data="admin_broadcast")],
-        [InlineKeyboardButton(text="➕ Создать промокод", callback_data="admin_create_promo")],
+        [InlineKeyboardButton(text="📢 Рассылка", callback_data="admin_broadcast", style=ButtonStyle.PRIMARY)],
+        [InlineKeyboardButton(text="➕ Создать промокод", callback_data="admin_create_promo", style=ButtonStyle.SUCCESS)],
         [InlineKeyboardButton(text="🎟 Все промокоды", callback_data="admin_all_promos")],
         [InlineKeyboardButton(text="🖼 Модерация рекламы", callback_data="admin_moderate_ads")],
-        [InlineKeyboardButton(text="🗑 Удалить рекламу", callback_data="admin_delete_ads")],
-        [InlineKeyboardButton(text="🎁 Подарок всем", callback_data="admin_global_gift")],
+        [InlineKeyboardButton(text="🗑 Удалить рекламу", callback_data="admin_delete_ads", style=ButtonStyle.DANGER)],
+        [InlineKeyboardButton(text="🎁 Подарок всем", callback_data="admin_global_gift", style=ButtonStyle.SUCCESS)],
         [InlineKeyboardButton(text="🔙 Назад", callback_data="admin_panel")]
     ])
 
@@ -1309,20 +1312,20 @@ def admin_content_keyboard():
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="🛒 Управление товарами", callback_data="admin_shop")],
         [InlineKeyboardButton(text="📝 Команды", callback_data="admin_manage_commands")],
-        [InlineKeyboardButton(text="➕ Добавить команду", callback_data="admin_add_command")],
+        [InlineKeyboardButton(text="➕ Добавить команду", callback_data="admin_add_command", style=ButtonStyle.SUCCESS)],
         [InlineKeyboardButton(text="🖼 Медиа (/add)", callback_data="admin_manage_media")],
         [InlineKeyboardButton(text="🔙 Назад", callback_data="admin_panel")]
     ])
 
 def admin_settings_keyboard(is_main: bool):
     buttons = [
-        [InlineKeyboardButton(text="🔧 Тех. работы", callback_data="admin_maintenance")],
+        [InlineKeyboardButton(text="🔧 Тех. работы", callback_data="admin_maintenance", style=ButtonStyle.DANGER)],
         [InlineKeyboardButton(text="⚙️ Игровые цены", callback_data="admin_settings")],
         [InlineKeyboardButton(text="📥 Скачать БД", callback_data="admin_download_db")]
     ]
     if is_main:
         buttons.append([InlineKeyboardButton(text="👑 Управление админами", callback_data="admin_manage_admins")])
-        buttons.append([InlineKeyboardButton(text="☢️ SUPER RESET", callback_data="super_reset")])
+        buttons.append([InlineKeyboardButton(text="☢️ SUPER RESET", callback_data="super_reset", style=ButtonStyle.DANGER)])
     buttons.append([InlineKeyboardButton(text="🔙 Назад", callback_data="admin_panel")])
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
@@ -1958,6 +1961,45 @@ async def death_dev_test(message: Message):
 # =====================================
 # 📱 REPLY КНОПКИ (внизу экрана)
 # =====================================
+
+@router.message(F.text == "🏠 Меню")
+async def reply_menu(message: Message, state: FSMContext):
+    await state.clear()
+    user_id = message.from_user.id
+    is_banned, ban_reason = await check_user_banned(user_id)
+    if is_banned:
+        await message.answer(f"🚫 Вы заблокированы!\n\nПричина: {ban_reason or 'Не указана'}")
+        return
+    if not await check_subscription(bot, user_id):
+        await message.answer(
+            "📢 Для использования бота подпишись на канал!\n\n🦔Говорящий Еж🦔",
+            reply_markup=subscription_keyboard()
+        )
+        return
+    await update_username(user_id, message.from_user.username or "Unknown")
+    user = await get_user(user_id)
+    if not user:
+        await message.answer("❌ Вы не зарегистрированы! Нажмите /start")
+        return
+    if user['status'] != 'alive':
+        await message.answer("🪦 Вы в посмертии...", reply_markup=death_reply_keyboard())
+        return
+    is_user_admin = await is_admin(user_id)
+    is_fake = await is_fake_admin(user_id)
+    media_info = await get_screen_media("menu")
+    text = f"Привет! 👋🦔\nТвой номер игрока: {format_player_number(user['player_number'])}"
+    await message.answer(text, reply_markup=main_reply_keyboard(is_user_admin, is_fake))
+    if media_info:
+        try:
+            if media_info['media_type'] == 'photo':
+                await message.answer_photo(media_info['file_id'], caption="Вот меню бота:", reply_markup=main_menu_keyboard(is_user_admin))
+            elif media_info['media_type'] == 'video':
+                await message.answer_video(media_info['file_id'], caption="Вот меню бота:", reply_markup=main_menu_keyboard(is_user_admin))
+        except:
+            await message.answer("Вот меню бота:", reply_markup=main_menu_keyboard(is_user_admin))
+    else:
+        await message.answer("Вот меню бота:", reply_markup=main_menu_keyboard(is_user_admin))
+
 
 @router.message(F.text == "🦔 Мой Ёж")
 async def reply_my_hedgehog(message: Message, state: FSMContext):
