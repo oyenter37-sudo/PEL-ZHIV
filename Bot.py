@@ -1643,8 +1643,14 @@ async def cmd_start(message: Message, command: CommandObject, state: FSMContext)
         await message.answer("🔧 Ведутся технические работы!\n\nПопробуйте позже.")
         return
     
-    await update_username(user_id, username)
-    await ensure_main_admin(username)
+    try:
+        await update_username(user_id, username)
+    except Exception:
+        pass
+    try:
+        await ensure_main_admin(username)
+    except Exception:
+        pass
     
     # Обработка рефералов и диплинков
     args = command.args
@@ -1678,6 +1684,10 @@ async def cmd_start(message: Message, command: CommandObject, state: FSMContext)
                 pass
         user = await get_user(user_id)
     
+    if not user:
+        await message.answer("❌ Ошибка регистрации. Попробуйте ещё раз.")
+        return
+
     # Авто-активация промо из диплинка
     if promo_to_activate:
         pass # Обработаем ниже
@@ -1692,22 +1702,17 @@ async def cmd_start(message: Message, command: CommandObject, state: FSMContext)
              await process_promocode(message, user_id, promo_to_activate)
         return
 
-    # Проверка медиа для меню
-    media_info = await get_screen_media("menu")
-    
-    text = f"Привет! 👋🦔\nТвой номер игрока: {format_player_number(user['player_number'])}"
-    await message.answer(text, reply_markup=main_reply_keyboard(is_user_admin, is_fake))
-    
-    if media_info:
-        try:
-            if media_info['media_type'] == 'photo':
-                await message.answer_photo(media_info['file_id'], caption="Вот меню бота:", reply_markup=main_menu_keyboard(is_user_admin))
-            elif media_info['media_type'] == 'video':
-                await message.answer_video(media_info['file_id'], caption="Вот меню бота:", reply_markup=main_menu_keyboard(is_user_admin))
-        except:
-            await message.answer("Вот меню бота:", reply_markup=main_menu_keyboard(is_user_admin))
-    else:
+    # Отправляем reply-клавиатуру и inline-меню
+    try:
+        text = f"Привет! 👋🦔\nТвой номер игрока: {format_player_number(user['player_number'])}"
+        await message.answer(text, reply_markup=main_reply_keyboard(is_user_admin, is_fake))
         await message.answer("Вот меню бота:", reply_markup=main_menu_keyboard(is_user_admin))
+    except Exception as e:
+        print(f"❌ Ошибка показа меню в cmd_start: {e}")
+        try:
+            await message.answer("Вот меню бота:", reply_markup=main_menu_keyboard(is_user_admin))
+        except:
+            pass
         
     if promo_to_activate:
         await process_promocode(message, user_id, promo_to_activate)
@@ -1746,15 +1751,24 @@ async def show_menu(callback: CallbackQuery, state: FSMContext):
     if not await check_access(bot, callback.from_user.id, callback):
         return
     
-    await update_username(callback.from_user.id, callback.from_user.username or "Unknown")
+    try:
+        await update_username(callback.from_user.id, callback.from_user.username or "Unknown")
+    except Exception:
+        pass
     is_user_admin = await is_admin(callback.from_user.id)
     
-    await safe_edit_text(
-        callback.message,
-        "Привет! 👋🦔\nВот меню бота:",
-        reply_markup=main_menu_keyboard(is_user_admin),
-        media_screen="menu"
-    )
+    try:
+        await safe_edit_text(
+            callback.message,
+            "Привет! 👋🦔\nВот меню бота:",
+            reply_markup=main_menu_keyboard(is_user_admin),
+            media_screen="menu"
+        )
+    except Exception:
+        try:
+            await callback.message.answer("Вот меню бота:", reply_markup=main_menu_keyboard(is_user_admin))
+        except:
+            pass
 
 
 @router.callback_query(F.data == "noop")
@@ -1945,7 +1959,10 @@ async def reply_menu(message: Message, state: FSMContext):
     if is_banned:
         await message.answer(f"🚫 Вы заблокированы!\n\nПричина: {ban_reason or 'Не указана'}")
         return
-    await update_username(user_id, message.from_user.username or "Unknown")
+    try:
+        await update_username(user_id, message.from_user.username or "Unknown")
+    except Exception:
+        pass
     user = await get_user(user_id)
     if not user:
         await message.answer("❌ Вы не зарегистрированы! Нажмите /start")
@@ -1955,19 +1972,15 @@ async def reply_menu(message: Message, state: FSMContext):
         return
     is_user_admin = await is_admin(user_id)
     is_fake = await is_fake_admin(user_id)
-    media_info = await get_screen_media("menu")
-    text = f"Привет! 👋🦔\nТвой номер игрока: {format_player_number(user['player_number'])}"
-    await message.answer(text, reply_markup=main_reply_keyboard(is_user_admin, is_fake))
-    if media_info:
-        try:
-            if media_info['media_type'] == 'photo':
-                await message.answer_photo(media_info['file_id'], caption="Вот меню бота:", reply_markup=main_menu_keyboard(is_user_admin))
-            elif media_info['media_type'] == 'video':
-                await message.answer_video(media_info['file_id'], caption="Вот меню бота:", reply_markup=main_menu_keyboard(is_user_admin))
-        except:
-            await message.answer("Вот меню бота:", reply_markup=main_menu_keyboard(is_user_admin))
-    else:
+    try:
+        text = f"Привет! 👋🦔\nТвой номер игрока: {format_player_number(user['player_number'])}"
+        await message.answer(text, reply_markup=main_reply_keyboard(is_user_admin, is_fake))
         await message.answer("Вот меню бота:", reply_markup=main_menu_keyboard(is_user_admin))
+    except Exception:
+        try:
+            await message.answer("Вот меню бота:", reply_markup=main_menu_keyboard(is_user_admin))
+        except:
+            pass
 
 
 @router.message(F.text == "🦔 Мой Ёж")
