@@ -540,12 +540,16 @@ async def update_username(user_id: int, new_username: str):
         async with db.execute("SELECT username FROM users WHERE user_id = ?", (user_id,)) as cursor:
             row = await cursor.fetchone()
             old_username = row[0] if row else None
-        
+
         await db.execute("UPDATE users SET username = ? WHERE user_id = ?", (new_username, user_id))
-        
-        if old_username:
-            await db.execute("UPDATE admins SET username = ? WHERE username = ?", (new_username, old_username))
-        
+
+        if old_username and old_username != new_username:
+            try:
+                await db.execute("UPDATE admins SET username = ? WHERE username = ?", (new_username, old_username))
+            except Exception:
+                # UNIQUE constraint — новый username уже есть в admins, просто пропускаем
+                pass
+
         await db.commit()
 
 
@@ -699,7 +703,7 @@ async def ensure_main_admin(username: str):
             async with db.execute("SELECT * FROM admins WHERE username = ?", (MAIN_ADMIN_USERNAME,)) as cursor:
                 if not await cursor.fetchone():
                     await db.execute('''
-                        INSERT INTO admins (username, added_by, added_at, can_edit_promos)
+                        INSERT OR IGNORE INTO admins (username, added_by, added_at, can_edit_promos)
                         VALUES (?, 'system', ?, 1)
                     ''', (MAIN_ADMIN_USERNAME, datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
                     await db.commit()
