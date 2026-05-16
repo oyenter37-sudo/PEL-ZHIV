@@ -1558,6 +1558,38 @@ async def safe_delete(message: Message):
         pass
 
 
+async def stream_text(chat_id: int, full_text: str, chunk_size: int = 25, delay: float = 0.06):
+    """Стримит текст через sendMessageDraft. Draft — эфемерное 30-сек превью.
+    После завершения отправляет финальное сообщение через sendMessage,
+    draft при этом автоматически заменится."""
+    draft_id = random.randint(1, 2**31 - 1)
+    streaming_ok = False
+
+    try:
+        # Показываем "Думает..."
+        await bot.send_message_draft(chat_id=chat_id, draft_id=draft_id, text="")
+        await asyncio.sleep(0.3)
+
+        current = ""
+        for i in range(0, len(full_text), chunk_size):
+            current += full_text[i:i + chunk_size]
+            try:
+                await bot.send_message_draft(chat_id=chat_id, draft_id=draft_id, text=current)
+            except Exception:
+                break
+            await asyncio.sleep(delay)
+
+        streaming_ok = True
+    except Exception:
+        pass
+
+    # Даём клиенту отрендерить последний чанк
+    if streaming_ok:
+        await asyncio.sleep(0.4)
+
+    return streaming_ok
+
+
 async def check_access(bot_instance: Bot, user_id: int, callback: CallbackQuery = None, message: Message = None) -> bool:
     is_banned, ban_reason = await check_user_banned(user_id)
     if is_banned:
@@ -2971,18 +3003,34 @@ async def call_hedgehog(callback: CallbackQuery, state: FSMContext):
     if not await check_access(bot, callback.from_user.id, callback):
         return
     
+    chat_id = callback.message.chat.id
     await safe_edit_text(callback.message, "📞 Звонок ежу 📞\n\n🔄 Соединение...", media_screen="call")
     
-    await asyncio.sleep(random.randint(5, 10))
+    # Имитация дозвона
+    await asyncio.sleep(random.randint(2, 4))
     
-    answer = random.choice(["ДА!", "НЕТ!"])
+    answers = [
+        "Фыр-фыр-фыр! 🦔",
+        "Я занят! Считаю муравьёв... 🐜",
+        "Привет! Ты покормил меня? 🥕",
+        "Не мешай, я сплю! 😴🦔",
+        "ДА!",
+        "НЕТ!",
+        "Пффф... *свернулся в клубок* 🦔",
+        "Кто там? Опять ты? 🙄",
+        "Я нашёл алмаз! 💎✨",
+        "*звуки жевания* Хрум-хрум... 🍎",
+    ]
+    answer = random.choice(answers)
     
-    await safe_edit_text(
-        callback.message,
-        f"📞 Еж ответил!\n"
-        f"📞 Еж сказал: {answer}",
-        reply_markup=back_button("menu")
-    )
+    # Стриминг — еж «говорит» по телефону
+    full_text = f"📞 Еж ответил!\n📞 Еж сказал: {answer}"
+    await stream_text(chat_id, full_text, chunk_size=3, delay=0.07)
+    
+    try:
+        await callback.message.answer(full_text, reply_markup=back_button("menu"))
+    except Exception:
+        await safe_edit_text(callback.message, full_text, reply_markup=back_button("menu"))
 
 # =====================================
 # ♻️ ОБМЕННИК
@@ -3499,6 +3547,7 @@ async def ejino_spin(callback: CallbackQuery, state: FSMContext):
         return
     
     user_id = callback.from_user.id
+    chat_id = callback.message.chat.id
     
     await state.clear()
     
@@ -3544,13 +3593,21 @@ async def ejino_spin(callback: CallbackQuery, state: FSMContext):
     else:
         emoji = "😔"
     
-    await safe_edit_text(
-        callback.message,
-        f"🦔 ЕЖИНО крутится...\n\n"
+    # Стриминг — ЕЖИНО «крутится»
+    spin_text = "🦔 ЕЖИНО крутится... 🎰\n\n"
+    await stream_text(chat_id, spin_text, chunk_size=15, delay=0.04)
+    
+    await asyncio.sleep(0.5)
+    
+    result_text = (
+        f"🦔 ЕЖИНО — результат!\n\n"
         f"Результат: ×{multiplier} {emoji}\n\n"
-        f"Ставка: {bet} → Выигрыш: {win} Ежидзиков👍",
-        reply_markup=back_button("casino")
+        f"Ставка: {bet} → Выигрыш: {win} Ежидзиков👍"
     )
+    try:
+        await callback.message.answer(result_text, reply_markup=back_button("casino"))
+    except Exception:
+        await safe_edit_text(callback.message, result_text, reply_markup=back_button("casino"))
 
 
 # 🎰 СЛОТЫ
@@ -3604,6 +3661,7 @@ async def slots_spin(callback: CallbackQuery, state: FSMContext):
         return
     
     user_id = callback.from_user.id
+    chat_id = callback.message.chat.id
     
     await state.clear()
     
@@ -3647,14 +3705,34 @@ async def slots_spin(callback: CallbackQuery, state: FSMContext):
     else:
         emoji = "😔"
     
-    await safe_edit_text(
-        callback.message,
-        f"🎰 Крутим...\n\n"
+    # Стриминг слотов — символы «выпадают» по одному
+    slots_text = f"🎰 Крутим...\n\n"
+    await stream_text(chat_id, slots_text, chunk_size=20, delay=0.04)
+    
+    # Каждый слот «выпадает» с паузой
+    for i in range(3):
+        partial = " | ".join(result[:i+1])
+        remaining = " ❓ " * (2 - i)
+        line = f"[ {partial} {remaining}]"
+        draft_id = random.randint(1, 2**31 - 1)
+        try:
+            await bot.send_message_draft(chat_id=chat_id, draft_id=draft_id, text=f"🎰 Крутим...\n\n{line}")
+            await asyncio.sleep(0.6)
+        except Exception:
+            break
+    
+    await asyncio.sleep(0.3)
+    
+    final_text = (
+        f"🎰 Результат!\n\n"
         f"[ {result[0]} | {result[1]} | {result[2]} ]\n\n"
         f"Множитель: ×{multiplier} {emoji}\n"
-        f"💰 Результат: {win} Ежидзиков👍",
-        reply_markup=back_button("casino")
+        f"💰 Результат: {win} Ежидзиков👍"
     )
+    try:
+        await callback.message.answer(final_text, reply_markup=back_button("casino"))
+    except Exception:
+        await safe_edit_text(callback.message, final_text, reply_markup=back_button("casino"))
 
 
 # 🌟 НАЙДИ ЗВЕЗДУ (Updated v3.8 Logic)
@@ -3834,6 +3912,7 @@ async def x10_try(callback: CallbackQuery, state: FSMContext):
         return
     
     user_id = callback.from_user.id
+    chat_id = callback.message.chat.id
     await state.clear()
     
     if random.random() < 0.05:
@@ -3850,13 +3929,19 @@ async def x10_try(callback: CallbackQuery, state: FSMContext):
             )
             await db.commit()
         
-        await safe_edit_text(
-            callback.message,
+        # Драматический стриминг — ×10 ВЫИГРЫШ
+        await stream_text(chat_id, "☠️ ×10 ... ", chunk_size=4, delay=0.1)
+        await asyncio.sleep(0.8)
+        
+        result_text = (
             f"☠️ НЕВЕРОЯТНО! 🔥🎉🔥\n\n"
             f"ТЫ ВЫИГРАЛ ×10!!!\n"
-            f"💰 +{win} Ежидзиков👍!",
-            reply_markup=back_button("casino")
+            f"💰 +{win} Ежидзиков👍!"
         )
+        try:
+            await callback.message.answer(result_text, reply_markup=back_button("casino"))
+        except Exception:
+            await safe_edit_text(callback.message, result_text, reply_markup=back_button("casino"))
     else:
         async with aiosqlite.connect(DB_NAME) as db:
             cursor = await db.execute("UPDATE users SET balance = balance - ? WHERE user_id = ? AND balance >= ?", (bet, user_id, bet))
@@ -3869,12 +3954,15 @@ async def x10_try(callback: CallbackQuery, state: FSMContext):
             )
             await db.commit()
         
-        await safe_edit_text(
-            callback.message,
-            f"☠️ Не повезло... 💀\n\n"
-            f"💸 -{bet} Ежидзиков👍",
-            reply_markup=back_button("casino")
-        )
+        # Драматический стриминг — проигрыш
+        await stream_text(chat_id, "☠️ ×10 ... ", chunk_size=4, delay=0.1)
+        await asyncio.sleep(0.5)
+        
+        result_text = f"☠️ Не повезло... 💀\n\n💸 -{bet} Ежидзиков👍"
+        try:
+            await callback.message.answer(result_text, reply_markup=back_button("casino"))
+        except Exception:
+            await safe_edit_text(callback.message, result_text, reply_markup=back_button("casino"))
 
 # =====================================
 # 🎁 БОНУСЫ
@@ -3933,14 +4021,19 @@ async def daily_bonus(callback: CallbackQuery):
         )
         await db.commit()
     
-    await callback.answer(f"🎁 +{bonus_amount} Ежидзиков👍!", show_alert=True)
-    await safe_edit_text(
-        callback.message,
+    # Стриминг — бонус «раскрывается»
+    chat_id = callback.message.chat.id
+    await stream_text(chat_id, "🎁 Открываем бонус...", chunk_size=5, delay=0.08)
+    
+    result_text = (
         f"🎁 Ежедневный бонус получен!\n\n"
         f"+{bonus_amount} Ежидзиков👍\n\n"
-        "Приходи завтра за новым бонусом!",
-        reply_markup=back_button("bonuses")
+        "Приходи завтра за новым бонусом!"
     )
+    try:
+        await callback.message.answer(result_text, reply_markup=back_button("bonuses"))
+    except Exception:
+        await safe_edit_text(callback.message, result_text, reply_markup=back_button("bonuses"))
 
 
 @router.callback_query(F.data == "submit_ad")
