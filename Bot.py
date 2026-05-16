@@ -3619,9 +3619,9 @@ async def crafts_list(callback: CallbackQuery):
     await safe_edit_text(callback.message, text, reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons), parse_mode="Markdown")
 
 
-@router.callback_query(F.data.startswith("craft_") and ~F.data.startswith("craft_search"))
+@router.callback_query(lambda c: c.data and c.data.startswith("craft_") and c.data[6:].isdigit())
 async def craft_detail(callback: CallbackQuery):
-    craft_id = int(callback.data.replace("craft_", ""))
+    craft_id = int(callback.data[6:])
 
     async with aiosqlite.connect(DB_NAME) as db:
         db.row_factory = aiosqlite.Row
