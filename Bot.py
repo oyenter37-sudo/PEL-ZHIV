@@ -2869,8 +2869,7 @@ async def invite(callback: CallbackQuery, state: FSMContext):
     bot_info = await bot.get_me()
     invite_link = f"https://t.me/{bot_info.username}?start={user_id}"
     
-    await safe_edit_text(
-        callback.message,
+    full_text = (
         f"🎁👬 Приглашай друзей и получай крутые бонусы! И друзья тоже их получат! 🎁\n\n"
         f"🎁 Бонус для тебя:\n"
         f"- ПРОМОКОД НА 10 ЕЖИДЗИКОВ👍! 🎁\n"
@@ -2881,9 +2880,35 @@ async def invite(callback: CallbackQuery, state: FSMContext):
         f"🎁 Бонус для друга:\n"
         f"- 200 ежидзиков на старте, вместо 0! 🔔\n\n"
         f"Твоя ссылка (отправь другу/подруге):\n"
-        f"{invite_link}",
-        reply_markup=back_button("menu")
+        f"{invite_link}"
     )
+
+    # Стриминг через sendMessageDraft
+    draft_id = random.randint(1, 2**31 - 1)
+    chat_id = callback.message.chat.id
+
+    try:
+        # Показываем "Думает..."
+        await bot.send_message_draft(chat_id=chat_id, draft_id=draft_id, text="")
+        await asyncio.sleep(0.3)
+
+        # Постепенно добавляем текст
+        current = ""
+        chunk_size = 8
+        for i in range(0, len(full_text), chunk_size):
+            current += full_text[i:i + chunk_size]
+            await bot.send_message_draft(chat_id=chat_id, draft_id=draft_id, text=current)
+            await asyncio.sleep(0.03)
+
+        # Финальное сообщение (draft исчезает через ~30 сек, поэтому сохраняем)
+        await callback.message.answer(full_text, reply_markup=back_button("menu"))
+    except Exception:
+        # Fallback если стриминг не поддерживается
+        await safe_edit_text(
+            callback.message,
+            full_text,
+            reply_markup=back_button("menu")
+        )
 
 
 # =====================================
