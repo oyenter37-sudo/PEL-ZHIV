@@ -2915,11 +2915,13 @@ async def invite(callback: CallbackQuery, state: FSMContext):
     )
 
     # Стриминг через sendMessageDraft
-    # Draft — это эфемерное 30-секундное превью, обновляется по draft_id
-    # После завершения отправляем полноценное сообщение через sendMessage,
-    # а draft очищаем пустым текстом чтобы он не висел
+    # Draft — эфемерное 30-секундное превью. После завершения ОБЯЗАТЕЛЬНО
+    # отправляем sendMessage с полным текстом — draft при этом заменится сам.
+    # ВАЖНО: text="" показывает "Думает...", а НЕ очищает draft!
+    # Draft пропадёт сам когда придёт финальное сообщение от бота.
     draft_id = random.randint(1, 2**31 - 1)
     chat_id = callback.message.chat.id
+    streaming_ok = False
 
     try:
         # Показываем "Думает..." (пустой текст = placeholder)
@@ -2927,37 +2929,36 @@ async def invite(callback: CallbackQuery, state: FSMContext):
         await asyncio.sleep(0.4)
 
         # Постепенно добавляем текст крупными чанками
-        # Меньше API-вызовов = меньше шансов попасть в rate limit
         current = ""
-        chunk_size = 30  # было 8, увеличено чтобы снизить кол-во запросов
+        chunk_size = 30
         for i in range(0, len(full_text), chunk_size):
             current += full_text[i:i + chunk_size]
             try:
                 await bot.send_message_draft(chat_id=chat_id, draft_id=draft_id, text=current)
             except Exception:
-                # Если rate limit или ошибка — прерываем стриминг, переходим к финалу
+                # Rate limit или ошибка — прерываем стриминг
                 break
-            await asyncio.sleep(0.08)  # было 0.03, увеличено для стабильности
+            await asyncio.sleep(0.08)
 
-        # Очищаем draft (пустой текст убирает его из чата)
-        try:
-            await bot.send_message_draft(chat_id=chat_id, draft_id=draft_id, text="")
-        except Exception:
-            pass
+        streaming_ok = True
+    except Exception:
+        pass  # Стриминг совсем не завёлся — отправим обычным способом
 
-        # Финальное сообщение — сохраняется в чат навсегда
+    # Финальное сообщение — ВСЕГДА отправляем через answer() как НОВОЕ сообщение
+    # НЕ редактируем callback.message (это меню!) — иначе ломается стриминг
+    # Draft автоматически исчезнет когда придёт это сообщение
+    if streaming_ok:
+        # Даём клиенту секунду чтобы отрендерить последний чанк
+        await asyncio.sleep(0.5)
+
+    try:
         await callback.message.answer(full_text, reply_markup=back_button("menu"))
     except Exception:
-        # Fallback если стриминг не поддерживается
+        # Если answer не работает, отправляем через bot.send_message
         try:
-            await bot.send_message_draft(chat_id=chat_id, draft_id=draft_id, text="")
+            await bot.send_message(chat_id=chat_id, text=full_text, reply_markup=back_button("menu"))
         except Exception:
             pass
-        await safe_edit_text(
-            callback.message,
-            full_text,
-            reply_markup=back_button("menu")
-        )
 
 
 # =====================================
