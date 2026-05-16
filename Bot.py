@@ -1617,20 +1617,6 @@ async def check_access(bot_instance: Bot, user_id: int, callback: CallbackQuery 
             await message.answer(text)
         return False
     
-    if not await check_subscription(bot_instance, user_id):
-        if callback:
-            await safe_edit_text(
-                callback.message,
-                "📢 Для использования бота подпишись на канал!\n\n🦔Говорящий Еж🦔",
-                reply_markup=subscription_keyboard()
-            )
-        elif message:
-            await message.answer(
-                "📢 Для использования бота подпишись на канал!\n\n🦔Говорящий Еж🦔",
-                reply_markup=subscription_keyboard()
-            )
-        return False
-    
     return True
 
 # =====================================
@@ -1655,13 +1641,6 @@ async def cmd_start(message: Message, command: CommandObject, state: FSMContext)
     
     if await check_maintenance() and not await is_admin(user_id):
         await message.answer("🔧 Ведутся технические работы!\n\nПопробуйте позже.")
-        return
-    
-    if not await check_subscription(bot, user_id):
-        await message.answer(
-            "📢 Для использования бота подпишись на канал!\n\n🦔Говорящий Еж🦔",
-            reply_markup=subscription_keyboard()
-        )
         return
     
     await update_username(user_id, username)
@@ -1739,10 +1718,6 @@ async def check_sub_callback(callback: CallbackQuery, state: FSMContext):
     await state.clear()
     user_id = callback.from_user.id
     username = callback.from_user.username or "Unknown"
-    
-    if not await check_subscription(bot, user_id):
-        await callback.answer("❌ Ты ещё не подписался на канал!", show_alert=True)
-        return
     
     await update_username(user_id, username)
     
@@ -1969,12 +1944,6 @@ async def reply_menu(message: Message, state: FSMContext):
     is_banned, ban_reason = await check_user_banned(user_id)
     if is_banned:
         await message.answer(f"🚫 Вы заблокированы!\n\nПричина: {ban_reason or 'Не указана'}")
-        return
-    if not await check_subscription(bot, user_id):
-        await message.answer(
-            "📢 Для использования бота подпишись на канал!\n\n🦔Говорящий Еж🦔",
-            reply_markup=subscription_keyboard()
-        )
         return
     await update_username(user_id, message.from_user.username or "Unknown")
     user = await get_user(user_id)
@@ -6401,9 +6370,6 @@ async def check_promocode_and_commands(message: Message, state: FSMContext):
         return
     is_banned, _ = await check_user_banned(user_id)
     if is_banned:
-        return
-    if not await check_subscription(bot, user_id):
-        await message.answer("📢 Для использования бота подпишись на канал!\n\n🦔Говорящий Еж🦔", reply_markup=subscription_keyboard())
         return
     await update_username(user_id, username)
     
