@@ -1880,7 +1880,6 @@ async def process_buy_class(callback: CallbackQuery):
         await db.execute('''
             UPDATE users SET 
                 balance = balance - ?,
-                hedgehog_name = '🦔Ежъ🦔',
                 hedgehog_color = 'Не выбран',
                 hedgehog_class = ?,
                 happiness = 0,
@@ -1921,7 +1920,6 @@ async def death_dev_test(message: Message):
     async with aiosqlite.connect(DB_NAME) as db:
         await db.execute('''
             UPDATE users SET
-                hedgehog_name = '🦔Ежъ🦔',
                 hedgehog_color = 'Не выбран',
                 hedgehog_class = 'normal',
                 happiness = 0,
