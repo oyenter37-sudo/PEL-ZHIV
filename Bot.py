@@ -2915,26 +2915,44 @@ async def invite(callback: CallbackQuery, state: FSMContext):
     )
 
     # Стриминг через sendMessageDraft
+    # Draft — это эфемерное 30-секундное превью, обновляется по draft_id
+    # После завершения отправляем полноценное сообщение через sendMessage,
+    # а draft очищаем пустым текстом чтобы он не висел
     draft_id = random.randint(1, 2**31 - 1)
     chat_id = callback.message.chat.id
 
     try:
-        # Показываем "Думает..."
+        # Показываем "Думает..." (пустой текст = placeholder)
         await bot.send_message_draft(chat_id=chat_id, draft_id=draft_id, text="")
-        await asyncio.sleep(0.3)
+        await asyncio.sleep(0.4)
 
-        # Постепенно добавляем текст
+        # Постепенно добавляем текст крупными чанками
+        # Меньше API-вызовов = меньше шансов попасть в rate limit
         current = ""
-        chunk_size = 8
+        chunk_size = 30  # было 8, увеличено чтобы снизить кол-во запросов
         for i in range(0, len(full_text), chunk_size):
             current += full_text[i:i + chunk_size]
-            await bot.send_message_draft(chat_id=chat_id, draft_id=draft_id, text=current)
-            await asyncio.sleep(0.03)
+            try:
+                await bot.send_message_draft(chat_id=chat_id, draft_id=draft_id, text=current)
+            except Exception:
+                # Если rate limit или ошибка — прерываем стриминг, переходим к финалу
+                break
+            await asyncio.sleep(0.08)  # было 0.03, увеличено для стабильности
 
-        # Финальное сообщение (draft исчезает через ~30 сек, поэтому сохраняем)
+        # Очищаем draft (пустой текст убирает его из чата)
+        try:
+            await bot.send_message_draft(chat_id=chat_id, draft_id=draft_id, text="")
+        except Exception:
+            pass
+
+        # Финальное сообщение — сохраняется в чат навсегда
         await callback.message.answer(full_text, reply_markup=back_button("menu"))
     except Exception:
         # Fallback если стриминг не поддерживается
+        try:
+            await bot.send_message_draft(chat_id=chat_id, draft_id=draft_id, text="")
+        except Exception:
+            pass
         await safe_edit_text(
             callback.message,
             full_text,
