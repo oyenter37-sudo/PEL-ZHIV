@@ -322,6 +322,84 @@ async def init_db():
                 created_at TEXT
             )
         ''')
+
+        # Кузница: предметы
+        await db.execute('''
+            CREATE TABLE IF NOT EXISTS forge_items (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT UNIQUE NOT NULL,
+                default_price INTEGER DEFAULT 0,
+                currency TEXT DEFAULT 'balance',
+                mine_chance REAL DEFAULT 0,
+                mine_time INTEGER DEFAULT 0,
+                auctionable INTEGER DEFAULT 0,
+                smeltable INTEGER DEFAULT 0,
+                smelt_result_id INTEGER DEFAULT NULL,
+                smelt_result_qty INTEGER DEFAULT 1,
+                created_at TEXT
+            )
+        ''')
+
+        # Кузница: инвентарь игроков (отдельный от магазинного)
+        await db.execute('''
+            CREATE TABLE IF NOT EXISTS forge_inventory (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                item_id INTEGER NOT NULL,
+                quantity INTEGER DEFAULT 0,
+                UNIQUE(user_id, item_id),
+                FOREIGN KEY (item_id) REFERENCES forge_items(id)
+            )
+        ''')
+
+        # Кузница: крафты
+        await db.execute('''
+            CREATE TABLE IF NOT EXISTS crafts (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL,
+                result_item_id INTEGER NOT NULL,
+                result_qty INTEGER DEFAULT 1,
+                created_at TEXT,
+                FOREIGN KEY (result_item_id) REFERENCES forge_items(id)
+            )
+        ''')
+
+        # Кузница: ингредиенты для крафтов
+        await db.execute('''
+            CREATE TABLE IF NOT EXISTS craft_ingredients (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                craft_id INTEGER NOT NULL,
+                item_id INTEGER NOT NULL,
+                quantity INTEGER DEFAULT 1,
+                FOREIGN KEY (craft_id) REFERENCES crafts(id),
+                FOREIGN KEY (item_id) REFERENCES forge_items(id)
+            )
+        ''')
+
+        # Кузница: аукцион (выставленные лоты)
+        await db.execute('''
+            CREATE TABLE IF NOT EXISTS auction_listings (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                seller_id INTEGER NOT NULL,
+                item_id INTEGER NOT NULL,
+                quantity INTEGER DEFAULT 1,
+                price INTEGER NOT NULL,
+                currency TEXT DEFAULT 'balance',
+                is_standard INTEGER DEFAULT 0,
+                active INTEGER DEFAULT 1,
+                created_at TEXT
+            )
+        ''')
+
+        # Кузница: состояние шахты игрока
+        await db.execute('''
+            CREATE TABLE IF NOT EXISTS mine_state (
+                user_id INTEGER PRIMARY KEY,
+                mining_until TEXT DEFAULT NULL,
+                cooldown_until TEXT DEFAULT NULL,
+                current_item_id INTEGER DEFAULT NULL
+            )
+        ''')
         
         # 2. МИГРАЦИЯ (ДОБАВЛЕНИЕ КОЛОНОК)
         new_columns = [
@@ -346,7 +424,10 @@ async def init_db():
             ("users", "ban_ads", "INTEGER DEFAULT 0"),
             ("users", "ban_books", "INTEGER DEFAULT 0"),
             ("users", "is_fake_admin", "INTEGER DEFAULT 0"),
-            ("users", "alert_sent", "INTEGER DEFAULT 0")
+            ("users", "alert_sent", "INTEGER DEFAULT 0"),
+            # Кузница
+            ("forge_items", "smelt_result_id", "INTEGER DEFAULT NULL"),
+            ("forge_items", "smelt_result_qty", "INTEGER DEFAULT 1")
         ]
         
         for table, column, col_type in new_columns:
@@ -826,6 +907,30 @@ class AdminStates(StatesGroup):
     # Fake Admin FSM
     waiting_fake_admin_search = State()
 
+# Кузница FSM
+class ForgeStates(StatesGroup):
+    # Создание предмета кузницы (админ)
+    waiting_forge_item_name = State()
+    waiting_forge_item_price = State()
+    waiting_forge_item_currency = State()
+    waiting_forge_item_mine_chance = State()
+    waiting_forge_item_mine_time = State()
+    waiting_forge_item_auctionable = State()
+    waiting_forge_item_smeltable = State()
+    waiting_forge_item_smelt_result = State()
+    waiting_forge_item_smelt_qty = State()
+    # Создание крафта (админ)
+    waiting_craft_name = State()
+    waiting_craft_result = State()
+    waiting_craft_result_qty = State()
+    waiting_craft_ingredient = State()
+    waiting_craft_ingredient_qty = State()
+    # Аукцион: выставление лота
+    waiting_auction_price = State()
+    waiting_auction_currency = State()
+    # Поиск крафтов
+    waiting_craft_search = State()
+
 # =====================================
 # 🦔 ГОВОРЯЩИЙ ЕЖ - ЧАСТЬ 2/5 🦔
 # =====================================
@@ -927,9 +1032,64 @@ def pet_keyboard():
 def puzzle_keyboard():
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="🛒 Магазин", callback_data="shop", style=ButtonStyle.SUCCESS)],
-        [InlineKeyboardButton(text="⚒️ Кузница", callback_data="stub_forge")],
+        [InlineKeyboardButton(text="⚒️ Кузница", callback_data="forge", style=ButtonStyle.PRIMARY)],
         [InlineKeyboardButton(text="🤖 ИИ-ЕЖ", callback_data="stub_ai")],
         [InlineKeyboardButton(text="Назад ◀️◀️◀️", callback_data="menu")]
+    ])
+
+
+def forge_keyboard():
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🤛 Крафты", callback_data="forge_crafts"),
+         InlineKeyboardButton(text="⛏️ Шахты", callback_data="forge_mine")],
+        [InlineKeyboardButton(text="📈 Аукцион", callback_data="forge_auction"),
+         InlineKeyboardButton(text="✌️ Инвентарь", callback_data="forge_inventory")],
+        [InlineKeyboardButton(text="Назад ◀️◀️◀️", callback_data="puzzle")]
+    ])
+
+
+def forge_crafts_keyboard():
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="📖 Все крафты", callback_data="crafts_list")],
+        [InlineKeyboardButton(text="🔍 Поиск крафта", callback_data="craft_search")],
+        [InlineKeyboardButton(text="🔥 Печь (переплавка)", callback_data="forge_furnace", style=ButtonStyle.DANGER)],
+        [InlineKeyboardButton(text="Назад ◀️◀️◀️", callback_data="forge")]
+    ])
+
+
+def forge_mine_keyboard(mining: bool = False, cooldown: bool = False):
+    if mining:
+        return InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="✅ Проверить добычу", callback_data="forge_mine_check", style=ButtonStyle.SUCCESS)],
+            [InlineKeyboardButton(text="Назад ◀️◀️◀️", callback_data="forge")]
+        ])
+    elif cooldown:
+        return InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="😴 Передышка...", callback_data="forge_mine")],
+            [InlineKeyboardButton(text="Назад ◀️◀️◀️", callback_data="forge")]
+        ])
+    else:
+        return InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="⛏️ Копать!", callback_data="mine_start", style=ButtonStyle.SUCCESS)],
+            [InlineKeyboardButton(text="Назад ◀️◀️◀️", callback_data="forge")]
+        ])
+
+
+def forge_auction_keyboard():
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🏪 Купить предметы", callback_data="auction_shop")],
+        [InlineKeyboardButton(text="📊 Чужие предложения", callback_data="auction_listings")],
+        [InlineKeyboardButton(text="💰 Мои лоты", callback_data="auction_my_lots")],
+        [InlineKeyboardButton(text="📤 Выставить предмет", callback_data="auction_sell")],
+        [InlineKeyboardButton(text="Назад ◀️◀️◀️", callback_data="forge")]
+    ])
+
+
+def auction_currency_keyboard(action_data: str):
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="💰 Ежидзики", callback_data=f"{action_data}_balance"),
+         InlineKeyboardButton(text="💎 Алмазы", callback_data=f"{action_data}_diamonds")],
+        [InlineKeyboardButton(text="❌ Отмена", callback_data="forge_auction")]
     ])
 
 
@@ -1318,10 +1478,21 @@ def admin_marketing_keyboard():
 def admin_content_keyboard():
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="🛒 Управление товарами", callback_data="admin_shop")],
+        [InlineKeyboardButton(text="⚒️ Кузница (предметы)", callback_data="admin_forge")],
         [InlineKeyboardButton(text="📝 Команды", callback_data="admin_manage_commands")],
         [InlineKeyboardButton(text="➕ Добавить команду", callback_data="admin_add_command", style=ButtonStyle.SUCCESS)],
         [InlineKeyboardButton(text="🖼 Медиа (/add)", callback_data="admin_manage_media")],
         [InlineKeyboardButton(text="🔙 Назад", callback_data="admin_panel")]
+    ])
+
+
+def admin_forge_keyboard():
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="➕ Добавить предмет 2", callback_data="admin_add_forge_item", style=ButtonStyle.SUCCESS)],
+        [InlineKeyboardButton(text="🗑 Удалить предмет", callback_data="admin_del_forge_item")],
+        [InlineKeyboardButton(text="🔧 Управление крафтами", callback_data="admin_crafts")],
+        [InlineKeyboardButton(text="📋 Список предметов", callback_data="admin_forge_list")],
+        [InlineKeyboardButton(text="🔙 Назад", callback_data="admin_folder_content")]
     ])
 
 def admin_settings_keyboard(is_main: bool):
@@ -3319,11 +3490,937 @@ async def website_info(callback: CallbackQuery):
     await safe_edit_text(callback.message, text, reply_markup=back_button("menu"), media_screen="website")
 
 # =====================================
-# 🚧 STUBS (Заглушки)
+# ⚒️ КУЗНИЦА
 # =====================================
-@router.callback_query(F.data.in_(["stub_forge", "stub_ai"]))
-async def stub_handler(callback: CallbackQuery):
-    await callback.answer("🚧 Раздел в разработке!\nСледите за новостями.", show_alert=True)
+
+# --- Вспомогательные функции ---
+async def get_forge_inventory(user_id: int) -> dict:
+    """Возвращает dict {item_id: quantity} инвентаря кузницы игрока."""
+    async with aiosqlite.connect(DB_NAME) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute(
+            "SELECT item_id, quantity FROM forge_inventory WHERE user_id = ? AND quantity > 0",
+            (user_id,)
+        ) as cursor:
+            rows = await cursor.fetchall()
+    return {row['item_id']: row['quantity'] for row in rows}
+
+
+async def add_forge_item_to_user(user_id: int, item_id: int, qty: int = 1):
+    """Добавляет предмет кузницы в инвентарь игрока."""
+    async with aiosqlite.connect(DB_NAME) as db:
+        await db.execute('''
+            INSERT INTO forge_inventory (user_id, item_id, quantity)
+            VALUES (?, ?, ?)
+            ON CONFLICT(user_id, item_id) DO UPDATE SET quantity = quantity + ?
+        ''', (user_id, item_id, qty, qty))
+        await db.commit()
+
+
+async def remove_forge_item_from_user(user_id: int, item_id: int, qty: int = 1) -> bool:
+    """Убирает предмет из инвентаря. Возвращает False если недостаточно."""
+    async with aiosqlite.connect(DB_NAME) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute(
+            "SELECT quantity FROM forge_inventory WHERE user_id = ? AND item_id = ?",
+            (user_id, item_id)
+        ) as cursor:
+            row = await cursor.fetchone()
+        if not row or row['quantity'] < qty:
+            return False
+        new_qty = row['quantity'] - qty
+        if new_qty <= 0:
+            await db.execute(
+                "DELETE FROM forge_inventory WHERE user_id = ? AND item_id = ?",
+                (user_id, item_id)
+            )
+        else:
+            await db.execute(
+                "UPDATE forge_inventory SET quantity = ? WHERE user_id = ? AND item_id = ?",
+                (new_qty, user_id, item_id)
+            )
+        await db.commit()
+    return True
+
+
+async def get_forge_item_by_id(item_id: int):
+    """Получает предмет кузницы по ID."""
+    async with aiosqlite.connect(DB_NAME) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute("SELECT * FROM forge_items WHERE id = ?", (item_id,)) as cursor:
+            return await cursor.fetchone()
+
+
+# --- ГЛАВНОЕ МЕНЮ КУЗНИЦЫ ---
+@router.callback_query(F.data == "forge")
+async def forge_menu(callback: CallbackQuery, state: FSMContext):
+    await state.clear()
+    if not await check_access(bot, callback.from_user.id, callback):
+        return
+    await safe_edit_text(
+        callback.message,
+        "⛏️ **Кузница**\n\nВыбери раздел:",
+        reply_markup=forge_keyboard(),
+        parse_mode="Markdown"
+    )
+
+
+# --- КРАФТЫ ---
+@router.callback_query(F.data == "forge_crafts")
+async def forge_crafts_menu(callback: CallbackQuery, state: FSMContext):
+    await state.clear()
+    await safe_edit_text(
+        callback.message,
+        "🤛 **Крафты**\n\nЗдесь можно создавать предметы из ингредиентов "
+        "или переплавлять их в печи.",
+        reply_markup=forge_crafts_keyboard(),
+        parse_mode="Markdown"
+    )
+
+
+@router.callback_query(F.data == "crafts_list")
+async def crafts_list(callback: CallbackQuery):
+    async with aiosqlite.connect(DB_NAME) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute("SELECT * FROM crafts ORDER BY id") as cursor:
+            crafts = await cursor.fetchall()
+
+    if not crafts:
+        await callback.answer("📭 Крафтов пока нет!", show_alert=True)
+        return
+
+    text = "📖 **Все крафты:**\n\n"
+    buttons = []
+    for craft in crafts:
+        # Получаем ингредиенты
+        async with aiosqlite.connect(DB_NAME) as db:
+            db.row_factory = aiosqlite.Row
+            async with db.execute(
+                "SELECT ci.quantity, fi.name FROM craft_ingredients ci "
+                "JOIN forge_items fi ON ci.item_id = fi.id WHERE ci.craft_id = ?",
+                (craft['id'],)
+            ) as cursor:
+                ingredients = await cursor.fetchall()
+            async with db.execute(
+                "SELECT name FROM forge_items WHERE id = ?",
+                (craft['result_item_id'],)
+            ) as cursor:
+                result_item = await cursor.fetchone()
+
+        result_name = result_item['name'] if result_item else "???"
+        ing_text = ", ".join(f"{ing['name']} x{ing['quantity']}" for ing in ingredients)
+        text += f"🔧 **{craft['name']}** → {result_name} x{craft['result_qty']}\n   Нужно: {ing_text}\n\n"
+        buttons.append([InlineKeyboardButton(
+            text=f"🔧 {craft['name']} → {result_name} x{craft['result_qty']}",
+            callback_data=f"craft_{craft['id']}"
+        )])
+
+    buttons.append([InlineKeyboardButton(text="Назад ◀️◀️◀️", callback_data="forge_crafts")])
+    await safe_edit_text(callback.message, text, reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons), parse_mode="Markdown")
+
+
+@router.callback_query(F.data.startswith("craft_") and ~F.data.startswith("craft_search"))
+async def craft_detail(callback: CallbackQuery):
+    craft_id = int(callback.data.replace("craft_", ""))
+
+    async with aiosqlite.connect(DB_NAME) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute("SELECT * FROM crafts WHERE id = ?", (craft_id,)) as cursor:
+            craft = await cursor.fetchone()
+        if not craft:
+            await callback.answer("❌ Крафт не найден!", show_alert=True)
+            return
+
+        async with db.execute(
+            "SELECT ci.quantity, fi.name, fi.id FROM craft_ingredients ci "
+            "JOIN forge_items fi ON ci.item_id = fi.id WHERE ci.craft_id = ?",
+            (craft_id,)
+        ) as cursor:
+            ingredients = await cursor.fetchall()
+        async with db.execute("SELECT name FROM forge_items WHERE id = ?", (craft['result_item_id'],)) as cursor:
+            result_item = await cursor.fetchone()
+
+    result_name = result_item['name'] if result_item else "???"
+    inv = await get_forge_inventory(callback.from_user.id)
+
+    text = f"🔧 **{craft['name']}**\n\n"
+    text += f"Результат: **{result_name}** x{craft['result_qty']}\n\n"
+    text += "Ингредиенты:\n"
+    can_craft = True
+    for ing in ingredients:
+        have = inv.get(ing['id'], 0)
+        need = ing['quantity']
+        status = "✅" if have >= need else "❌"
+        text += f"  {status} {ing['name']}: {have}/{need}\n"
+        if have < need:
+            can_craft = False
+
+    buttons = []
+    if can_craft:
+        buttons.append([InlineKeyboardButton(
+            text="🛠 Скрафтить!", callback_data=f"do_craft_{craft_id}", style=ButtonStyle.SUCCESS
+        )])
+    buttons.append([InlineKeyboardButton(text="Назад ◀️◀️◀️", callback_data="crafts_list")])
+    await safe_edit_text(callback.message, text, reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons), parse_mode="Markdown")
+
+
+@router.callback_query(F.data.startswith("do_craft_"))
+async def do_craft(callback: CallbackQuery):
+    craft_id = int(callback.data.replace("do_craft_", ""))
+    user_id = callback.from_user.id
+
+    async with aiosqlite.connect(DB_NAME) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute("SELECT * FROM crafts WHERE id = ?", (craft_id,)) as cursor:
+            craft = await cursor.fetchone()
+        if not craft:
+            await callback.answer("❌ Крафт не найден!", show_alert=True)
+            return
+
+        async with db.execute(
+            "SELECT ci.quantity, ci.item_id FROM craft_ingredients ci WHERE ci.craft_id = ?",
+            (craft_id,)
+        ) as cursor:
+            ingredients = await cursor.fetchall()
+
+    # Проверяем наличие ингредиентов
+    inv = await get_forge_inventory(user_id)
+    for ing in ingredients:
+        if inv.get(ing['item_id'], 0) < ing['quantity']:
+            await callback.answer("❌ Недостаточно ингредиентов!", show_alert=True)
+            return
+
+    # Убираем ингредиенты
+    for ing in ingredients:
+        ok = await remove_forge_item_from_user(user_id, ing['item_id'], ing['quantity'])
+        if not ok:
+            await callback.answer("❌ Ошибка при крафте!", show_alert=True)
+            return
+
+    # Выдаём результат
+    await add_forge_item_to_user(user_id, craft['result_item_id'], craft['result_qty'])
+
+    async with aiosqlite.connect(DB_NAME) as db:
+        async with db.execute("SELECT name FROM forge_items WHERE id = ?", (craft['result_item_id'],)) as cursor:
+            result = await cursor.fetchone()
+
+    result_name = result['name'] if result else "Предмет"
+    await callback.answer(f"✅ Скрафчено: {result_name} x{craft['result_qty']}!", show_alert=True)
+    # Обновляем отображение крафта
+    await craft_detail(callback)
+
+
+@router.callback_query(F.data == "craft_search")
+async def craft_search_start(callback: CallbackQuery, state: FSMContext):
+    await state.set_state(ForgeStates.waiting_craft_search)
+    await safe_edit_text(
+        callback.message,
+        "🔍 Введи название крафта для поиска:",
+        reply_markup=back_button("forge_crafts")
+    )
+
+
+@router.message(ForgeStates.waiting_craft_search)
+async def craft_search_process(message: Message, state: FSMContext):
+    await state.clear()
+    query = message.text.strip().lower()
+
+    async with aiosqlite.connect(DB_NAME) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute(
+            "SELECT * FROM crafts WHERE LOWER(name) LIKE ? ORDER BY id",
+            (f"%{query}%",)
+        ) as cursor:
+            crafts = await cursor.fetchall()
+
+    if not crafts:
+        await message.answer("🔍 Ничего не найдено!", reply_markup=back_button("forge_crafts"))
+        return
+
+    text = f"🔍 Результаты поиска «{message.text}»:\n\n"
+    buttons = []
+    for craft in crafts:
+        async with aiosqlite.connect(DB_NAME) as db:
+            db.row_factory = aiosqlite.Row
+            async with db.execute("SELECT name FROM forge_items WHERE id = ?", (craft['result_item_id'],)) as cursor:
+                result_item = await cursor.fetchone()
+        result_name = result_item['name'] if result_item else "???"
+        text += f"🔧 **{craft['name']}** → {result_name} x{craft['result_qty']}\n"
+        buttons.append([InlineKeyboardButton(
+            text=f"🔧 {craft['name']}",
+            callback_data=f"craft_{craft['id']}"
+        )])
+
+    buttons.append([InlineKeyboardButton(text="Назад ◀️◀️◀️", callback_data="forge_crafts")])
+    await message.answer(text, reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons), parse_mode="Markdown")
+
+
+# --- ПЕЧЬ (ПЕРЕПЛАВКА) ---
+@router.callback_query(F.data == "forge_furnace")
+async def forge_furnace_menu(callback: CallbackQuery):
+    user_id = callback.from_user.id
+    inv = await get_forge_inventory(user_id)
+
+    if not inv:
+        await callback.answer("📭 У тебя нет предметов для переплавки!", show_alert=True)
+        return
+
+    # Получаем предметы, которые можно переплавить
+    async with aiosqlite.connect(DB_NAME) as db:
+        db.row_factory = aiosqlite.Row
+        smeltable_items = []
+        for item_id, qty in inv.items():
+            async with db.execute("SELECT * FROM forge_items WHERE id = ? AND smeltable = 1", (item_id,)) as cursor:
+                item = await cursor.fetchone()
+            if item:
+                smeltable_items.append((item, qty))
+
+    if not smeltable_items:
+        await callback.answer("🔥 Нет предметов, которые можно переплавить!", show_alert=True)
+        return
+
+    text = "🔥 **Печь — Переплавка**\n\nВыбери предмет для переплавки:\n\n"
+    buttons = []
+    for item, qty in smeltable_items:
+        if item['smelt_result_id']:
+            async with aiosqlite.connect(DB_NAME) as db:
+                db.row_factory = aiosqlite.Row
+                async with db.execute("SELECT name FROM forge_items WHERE id = ?", (item['smelt_result_id'],)) as cursor:
+                    result = await cursor.fetchone()
+            result_name = result['name'] if result else "???"
+            text += f"🔥 {item['name']} (x{qty}) → {result_name} x{item['smelt_result_qty']}\n"
+            buttons.append([InlineKeyboardButton(
+                text=f"🔥 {item['name']} (x{qty}) → {result_name} x{item['smelt_result_qty']}",
+                callback_data=f"smelt_{item['id']}"
+            )])
+
+    buttons.append([InlineKeyboardButton(text="Назад ◀️◀️◀️", callback_data="forge_crafts")])
+    await safe_edit_text(callback.message, text, reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons), parse_mode="Markdown")
+
+
+@router.callback_query(F.data.startswith("smelt_"))
+async def do_smelt(callback: CallbackQuery):
+    item_id = int(callback.data.replace("smelt_", ""))
+    user_id = callback.from_user.id
+
+    item = await get_forge_item_by_id(item_id)
+    if not item or not item['smeltable'] or not item['smelt_result_id']:
+        await callback.answer("❌ Нельзя переплавить!", show_alert=True)
+        return
+
+    # Убираем 1 шт предмета
+    ok = await remove_forge_item_from_user(user_id, item_id, 1)
+    if not ok:
+        await callback.answer("❌ Недостаточно предметов!", show_alert=True)
+        return
+
+    # Выдаём результат
+    await add_forge_item_to_user(user_id, item['smelt_result_id'], item['smelt_result_qty'])
+
+    async with aiosqlite.connect(DB_NAME) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute("SELECT name FROM forge_items WHERE id = ?", (item['smelt_result_id'],)) as cursor:
+            result = await cursor.fetchone()
+
+    result_name = result['name'] if result else "Предмет"
+    await callback.answer(f"🔥 Переплавлено! Получено: {result_name} x{item['smelt_result_qty']}", show_alert=True)
+    await forge_furnace_menu(callback)
+
+
+# --- ШАХТЫ ---
+@router.callback_query(F.data == "forge_mine")
+async def forge_mine_menu(callback: CallbackQuery):
+    user_id = callback.from_user.id
+    now = datetime.now()
+
+    async with aiosqlite.connect(DB_NAME) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute("SELECT * FROM mine_state WHERE user_id = ?", (user_id,)) as cursor:
+            mine = await cursor.fetchone()
+
+    if mine and mine['mining_until']:
+        mining_until = datetime.strptime(mine['mining_until'], "%Y-%m-%d %H:%M:%S")
+        if now < mining_until:
+            # Ещё копает
+            remaining = int((mining_until - now).total_seconds())
+            item = await get_forge_item_by_id(mine['current_item_id'])
+            item_name = item['name'] if item else "???"
+            text = f"⛏️ **Шахта**\n\n⏳ Копаю: **{item_name}**\nОсталось: {remaining} сек."
+            await safe_edit_text(callback.message, text, reply_markup=forge_mine_keyboard(mining=True), parse_mode="Markdown")
+            return
+
+    if mine and mine['cooldown_until']:
+        cooldown_until = datetime.strptime(mine['cooldown_until'], "%Y-%m-%d %H:%M:%S")
+        if now < cooldown_until:
+            # На передышке
+            remaining = int((cooldown_until - now).total_seconds())
+            text = f"⛏️ **Шахта**\n\n😴 Передышка...\nПодожди ещё {remaining} сек."
+            await safe_edit_text(callback.message, text, reply_markup=forge_mine_keyboard(cooldown=True), parse_mode="Markdown")
+            return
+
+    # Можно копать
+    text = "⛏️ **Шахта**\n\nНажми «Копать!» чтобы отправиться в шахту.\nЧем дольше копаешь — тем ценнее находка!"
+    await safe_edit_text(callback.message, text, reply_markup=forge_mine_keyboard(), parse_mode="Markdown")
+
+
+@router.callback_query(F.data == "mine_start")
+async def mine_start(callback: CallbackQuery):
+    user_id = callback.from_user.id
+
+    # Проверяем не в процессе ли
+    async with aiosqlite.connect(DB_NAME) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute("SELECT * FROM mine_state WHERE user_id = ?", (user_id,)) as cursor:
+            mine = await cursor.fetchone()
+
+    now = datetime.now()
+    if mine:
+        if mine['mining_until']:
+            mining_until = datetime.strptime(mine['mining_until'], "%Y-%m-%d %H:%M:%S")
+            if now < mining_until:
+                await callback.answer("⏳ Ты уже копаешь!", show_alert=True)
+                return
+        if mine['cooldown_until']:
+            cooldown_until = datetime.strptime(mine['cooldown_until'], "%Y-%m-%d %H:%M:%S")
+            if now < cooldown_until:
+                await callback.answer("😴 Передышка! Подожди.", show_alert=True)
+                return
+
+    # Выбираем случайный предмет по шансам
+    async with aiosqlite.connect(DB_NAME) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute("SELECT * FROM forge_items WHERE mine_chance > 0") as cursor:
+            mineable = await cursor.fetchall()
+
+    if not mineable:
+        await callback.answer("⛏️ В шахте пока ничего нет!", show_alert=True)
+        return
+
+    # Взвешенный рандом
+    import random
+    total_chance = sum(item['mine_chance'] for item in mineable)
+    roll = random.uniform(0, total_chance)
+    cumulative = 0
+    chosen = mineable[0]
+    for item in mineable:
+        cumulative += item['mine_chance']
+        if roll <= cumulative:
+            chosen = item
+            break
+
+    mine_time = chosen['mine_time'] if chosen['mine_time'] > 0 else 5
+    mining_until = now + timedelta(seconds=mine_time)
+
+    async with aiosqlite.connect(DB_NAME) as db:
+        await db.execute('''
+            INSERT INTO mine_state (user_id, mining_until, cooldown_until, current_item_id)
+            VALUES (?, ?, NULL, ?)
+            ON CONFLICT(user_id) DO UPDATE SET mining_until = ?, cooldown_until = NULL, current_item_id = ?
+        ''', (user_id, mining_until.strftime("%Y-%m-%d %H:%M:%S"), chosen['id'],
+              mining_until.strftime("%Y-%m-%d %H:%M:%S"), chosen['id']))
+        await db.commit()
+
+    text = f"⛏️ **Шахта**\n\n⏳ Копаю: **{chosen['name']}**\nВремя добычи: {mine_time} сек."
+    await safe_edit_text(callback.message, text, reply_markup=forge_mine_keyboard(mining=True), parse_mode="Markdown")
+
+
+@router.callback_query(F.data == "forge_mine_check")
+async def forge_mine_check(callback: CallbackQuery):
+    """Проверяем — может уже накопали?"""
+    user_id = callback.from_user.id
+    now = datetime.now()
+
+    async with aiosqlite.connect(DB_NAME) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute("SELECT * FROM mine_state WHERE user_id = ?", (user_id,)) as cursor:
+            mine = await cursor.fetchone()
+
+    if not mine or not mine['mining_until']:
+        await forge_mine_menu(callback)
+        return
+
+    mining_until = datetime.strptime(mine['mining_until'], "%Y-%m-%d %H:%M:%S")
+
+    if now >= mining_until:
+        # Накопали! Выдаём предмет
+        item = await get_forge_item_by_id(mine['current_item_id'])
+        if item:
+            await add_forge_item_to_user(user_id, item['id'], 1)
+
+        # Устанавливаем кулдаун
+        import random
+        cooldown = random.randint(10, 50)
+        cooldown_until = now + timedelta(seconds=cooldown)
+
+        async with aiosqlite.connect(DB_NAME) as db:
+            await db.execute('''
+                UPDATE mine_state SET mining_until = NULL, cooldown_until = ?, current_item_id = NULL
+                WHERE user_id = ?
+            ''', (cooldown_until.strftime("%Y-%m-%d %H:%M:%S"), user_id))
+            await db.commit()
+
+        item_name = item['name'] if item else "Предмет"
+        text = (f"⛏️ **Шахта**\n\n"
+                f"✅ Добыто: **{item_name}** x1!\n\n"
+                f"😴 Передышка: {cooldown} сек.")
+        await safe_edit_text(callback.message, text, reply_markup=forge_mine_keyboard(cooldown=True), parse_mode="Markdown")
+    else:
+        remaining = int((mining_until - now).total_seconds())
+        item = await get_forge_item_by_id(mine['current_item_id'])
+        item_name = item['name'] if item else "???"
+        text = f"⛏️ **Шахта**\n\n⏳ Копаю: **{item_name}**\nОсталось: {remaining} сек."
+        await safe_edit_text(callback.message, text, reply_markup=forge_mine_keyboard(mining=True), parse_mode="Markdown")
+
+
+# --- АУКЦИОН ---
+@router.callback_query(F.data == "forge_auction")
+async def forge_auction_menu(callback: CallbackQuery, state: FSMContext):
+    await state.clear()
+    await safe_edit_text(
+        callback.message,
+        "📈 **Аукцион**\n\nПокупай и продавай предметы!\n"
+        "Можно купить по стандартной цене или найти выгодные предложения от других игроков.",
+        reply_markup=forge_auction_keyboard(),
+        parse_mode="Markdown"
+    )
+
+
+@router.callback_query(F.data == "auction_shop")
+async def auction_shop(callback: CallbackQuery):
+    """Стандартные предметы, которые можно купить напрямую."""
+    async with aiosqlite.connect(DB_NAME) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute("SELECT * FROM forge_items WHERE auctionable = 1 ORDER BY default_price ASC") as cursor:
+            items = await cursor.fetchall()
+
+    if not items:
+        await callback.answer("🏪 Нет предметов для покупки!", show_alert=True)
+        return
+
+    text = "🏪 **Купить предметы**\n\nСтандартные цены:\n\n"
+    buttons = []
+    for item in items:
+        curr = CURRENCY_LABELS.get(item['currency'], item['currency'])
+        text += f"• {item['name']} — {item['default_price']} {curr}\n"
+        buttons.append([InlineKeyboardButton(
+            text=f"🛒 {item['name']} — {item['default_price']} {curr}",
+            callback_data=f"abuy_{item['id']}"
+        )])
+
+    buttons.append([InlineKeyboardButton(text="Назад ◀️◀️◀️", callback_data="forge_auction")])
+    await safe_edit_text(callback.message, text, reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons), parse_mode="Markdown")
+
+
+@router.callback_query(F.data.startswith("abuy_"))
+async def auction_buy_standard(callback: CallbackQuery):
+    """Покупка предмета по стандартной цене."""
+    item_id = int(callback.data.replace("abuy_", ""))
+    user_id = callback.from_user.id
+    item = await get_forge_item_by_id(item_id)
+
+    if not item or not item['auctionable']:
+        await callback.answer("❌ Предмет недоступен!", show_alert=True)
+        return
+
+    user = await get_user(user_id)
+    if not user:
+        await callback.answer("❌ Вы не зарегистрированы!", show_alert=True)
+        return
+
+    price = item['default_price']
+    currency = item['currency']
+
+    # Проверяем баланс
+    if currency == 'balance':
+        if user['balance'] < price:
+            await callback.answer("❌ Недостаточно ежидзиков!", show_alert=True)
+            return
+        async with aiosqlite.connect(DB_NAME) as db:
+            await db.execute("UPDATE users SET balance = balance - ? WHERE user_id = ?", (price, user_id))
+            await db.commit()
+    elif currency == 'diamonds':
+        if user['diamonds'] < price:
+            await callback.answer("❌ Недостаточно алмазов!", show_alert=True)
+            return
+        async with aiosqlite.connect(DB_NAME) as db:
+            await db.execute("UPDATE users SET diamonds = diamonds - ? WHERE user_id = ?", (price, user_id))
+            await db.commit()
+    else:
+        await callback.answer("❌ Неподдерживаемая валюта!", show_alert=True)
+        return
+
+    await add_forge_item_to_user(user_id, item_id, 1)
+    curr_name = CURRENCY_LABELS.get(currency, currency)
+    await callback.answer(f"✅ Куплено: {item['name']} за {price} {curr_name}!", show_alert=True)
+    await auction_shop(callback)
+
+
+@router.callback_query(F.data == "auction_listings")
+async def auction_listings_menu(callback: CallbackQuery, page: int = 0):
+    """Чужие предложения на аукционе."""
+    user_id = callback.from_user.id
+    per_page = 5
+
+    async with aiosqlite.connect(DB_NAME) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute('''
+            SELECT al.*, fi.name as item_name FROM auction_listings al
+            JOIN forge_items fi ON al.item_id = fi.id
+            WHERE al.active = 1 AND al.seller_id != ? AND al.is_standard = 0
+            ORDER BY al.created_at DESC
+        ''', (user_id,)) as cursor:
+            all_listings = await cursor.fetchall()
+
+    if not all_listings:
+        await callback.answer("📊 Нет предложений от игроков!", show_alert=True)
+        return
+
+    total = len(all_listings)
+    start = page * per_page
+    end = start + per_page
+    page_items = all_listings[start:end]
+
+    text = f"📊 **Чужие предложения** (стр. {page + 1})\n\n"
+    buttons = []
+    for listing in page_items:
+        curr = CURRENCY_LABELS.get(listing['currency'], listing['currency'])
+        text += f"• {listing['item_name']} x{listing['quantity']} — {listing['price']} {curr}\n"
+        buttons.append([InlineKeyboardButton(
+            text=f"💰 {listing['item_name']} x{listing['quantity']} — {listing['price']} {curr}",
+            callback_data=f"ablid_{listing['id']}"
+        )])
+
+    # Пагинация
+    nav = []
+    if page > 0:
+        nav.append(InlineKeyboardButton(text="⬅️", callback_data=f"alst_{page - 1}"))
+    if end < total:
+        nav.append(InlineKeyboardButton(text="➡️", callback_data=f"alst_{page + 1}"))
+    if nav:
+        buttons.append(nav)
+
+    buttons.append([InlineKeyboardButton(text="Назад ◀️◀️◀️", callback_data="forge_auction")])
+    await safe_edit_text(callback.message, text, reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons), parse_mode="Markdown")
+
+
+@router.callback_query(F.data.startswith("alst_"))
+async def auction_listings_page(callback: CallbackQuery):
+    page = int(callback.data.replace("alst_", ""))
+    await auction_listings_menu(callback, page)
+
+
+@router.callback_query(F.data.startswith("ablid_"))
+async def auction_buy_listing(callback: CallbackQuery):
+    """Покупка чужого лота."""
+    listing_id = int(callback.data.replace("ablid_", ""))
+    user_id = callback.from_user.id
+
+    async with aiosqlite.connect(DB_NAME) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute('''
+            SELECT al.*, fi.name as item_name FROM auction_listings al
+            JOIN forge_items fi ON al.item_id = fi.id
+            WHERE al.id = ? AND al.active = 1
+        ''', (listing_id,)) as cursor:
+            listing = await cursor.fetchone()
+
+    if not listing:
+        await callback.answer("❌ Лот не найден!", show_alert=True)
+        return
+
+    if listing['seller_id'] == user_id:
+        await callback.answer("❌ Это твой собственный лот!", show_alert=True)
+        return
+
+    user = await get_user(user_id)
+    if not user:
+        await callback.answer("❌ Вы не зарегистрированы!", show_alert=True)
+        return
+
+    price = listing['price']
+    currency = listing['currency']
+    curr_name = CURRENCY_LABELS.get(currency, currency)
+
+    # Проверяем баланс
+    if currency == 'balance':
+        if user['balance'] < price:
+            await callback.answer("❌ Недостаточно ежидзиков!", show_alert=True)
+            return
+        async with aiosqlite.connect(DB_NAME) as db:
+            await db.execute("UPDATE users SET balance = balance - ? WHERE user_id = ?", (price, user_id))
+            await db.execute("UPDATE users SET balance = balance + ? WHERE user_id = ?", (price, listing['seller_id']))
+            await db.execute("UPDATE auction_listings SET active = 0 WHERE id = ?", (listing_id,))
+            await db.commit()
+    elif currency == 'diamonds':
+        if user['diamonds'] < price:
+            await callback.answer("❌ Недостаточно алмазов!", show_alert=True)
+            return
+        async with aiosqlite.connect(DB_NAME) as db:
+            await db.execute("UPDATE users SET diamonds = diamonds - ? WHERE user_id = ?", (price, user_id))
+            await db.execute("UPDATE users SET diamonds = diamonds + ? WHERE user_id = ?", (price, listing['seller_id']))
+            await db.execute("UPDATE auction_listings SET active = 0 WHERE id = ?", (listing_id,))
+            await db.commit()
+    else:
+        await callback.answer("❌ Неподдерживаемая валюта!", show_alert=True)
+        return
+
+    await add_forge_item_to_user(user_id, listing['item_id'], listing['quantity'])
+    await callback.answer(f"✅ Куплено: {listing['item_name']} x{listing['quantity']} за {price} {curr_name}!", show_alert=True)
+    await auction_listings_menu(callback)
+
+
+@router.callback_query(F.data == "auction_my_lots")
+async def auction_my_lots(callback: CallbackQuery):
+    """Мои активные лоты."""
+    user_id = callback.from_user.id
+
+    async with aiosqlite.connect(DB_NAME) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute('''
+            SELECT al.*, fi.name as item_name FROM auction_listings al
+            JOIN forge_items fi ON al.item_id = fi.id
+            WHERE al.seller_id = ? AND al.active = 1
+            ORDER BY al.created_at DESC
+        ''', (user_id,)) as cursor:
+            listings = await cursor.fetchall()
+
+    if not listings:
+        await callback.answer("💰 У тебя нет активных лотов!", show_alert=True)
+        return
+
+    text = "💰 **Мои лоты:**\n\n"
+    buttons = []
+    for listing in listings:
+        curr = CURRENCY_LABELS.get(listing['currency'], listing['currency'])
+        text += f"• {listing['item_name']} x{listing['quantity']} — {listing['price']} {curr}\n"
+        buttons.append([InlineKeyboardButton(
+            text=f"❌ Снять: {listing['item_name']} x{listing['quantity']}",
+            callback_data=f"acancel_{listing['id']}",
+            style=ButtonStyle.DANGER
+        )])
+
+    buttons.append([InlineKeyboardButton(text="Назад ◀️◀️◀️", callback_data="forge_auction")])
+    await safe_edit_text(callback.message, text, reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons), parse_mode="Markdown")
+
+
+@router.callback_query(F.data.startswith("acancel_"))
+async def auction_cancel_listing(callback: CallbackQuery):
+    """Отмена своего лота — возврат предмета."""
+    listing_id = int(callback.data.replace("acancel_", ""))
+    user_id = callback.from_user.id
+
+    async with aiosqlite.connect(DB_NAME) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute(
+            "SELECT * FROM auction_listings WHERE id = ? AND seller_id = ? AND active = 1",
+            (listing_id, user_id)
+        ) as cursor:
+            listing = await cursor.fetchone()
+
+    if not listing:
+        await callback.answer("❌ Лот не найден!", show_alert=True)
+        return
+
+    # Возвращаем предмет
+    await add_forge_item_to_user(user_id, listing['item_id'], listing['quantity'])
+
+    async with aiosqlite.connect(DB_NAME) as db:
+        await db.execute("UPDATE auction_listings SET active = 0 WHERE id = ?", (listing_id,))
+        await db.commit()
+
+    await callback.answer("✅ Лот снят, предмет возвращён!", show_alert=True)
+    await auction_my_lots(callback)
+
+
+@router.callback_query(F.data == "auction_sell")
+async def auction_sell_start(callback: CallbackQuery, state: FSMContext):
+    """Выбор предмета для выставления на аукцион."""
+    user_id = callback.from_user.id
+    inv = await get_forge_inventory(user_id)
+
+    if not inv:
+        await callback.answer("📭 У тебя нет предметов для продажи!", show_alert=True)
+        return
+
+    async with aiosqlite.connect(DB_NAME) as db:
+        db.row_factory = aiosqlite.Row
+        buttons = []
+        for item_id, qty in inv.items():
+            async with db.execute("SELECT name FROM forge_items WHERE id = ?", (item_id,)) as cursor:
+                item = await cursor.fetchone()
+            if item:
+                buttons.append([InlineKeyboardButton(
+                    text=f"📤 {item['name']} (x{qty})",
+                    callback_data=f"asell_{item_id}"
+                )])
+
+    buttons.append([InlineKeyboardButton(text="Назад ◀️◀️◀️", callback_data="forge_auction")])
+    await safe_edit_text(
+        callback.message,
+        "📤 **Выставить предмет**\n\nВыбери предмет для продажи:",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons),
+        parse_mode="Markdown"
+    )
+
+
+@router.callback_query(F.data.startswith("asell_"))
+async def auction_sell_item(callback: CallbackQuery, state: FSMContext):
+    """Выбираем валюту для продажи."""
+    item_id = int(callback.data.replace("asell_", ""))
+    await state.update_data(sell_item_id=item_id)
+    await state.set_state(ForgeStates.waiting_auction_currency)
+
+    await safe_edit_text(
+        callback.message,
+        "💱 Выбери валюту для продажи:",
+        reply_markup=auction_currency_keyboard("asellcurr")
+    )
+
+
+@router.callback_query(F.data.startswith("asellcurr_"), ForgeStates.waiting_auction_currency)
+async def auction_sell_currency(callback: CallbackQuery, state: FSMContext):
+    currency = callback.data.replace("asellcurr_", "")
+    data = await state.get_data()
+    await state.update_data(sell_currency=currency)
+    await state.set_state(ForgeStates.waiting_auction_price)
+    await safe_edit_text(
+        callback.message,
+        "💰 Введи цену за 1 штуку:",
+        reply_markup=back_button("forge_auction")
+    )
+
+
+@router.message(ForgeStates.waiting_auction_price)
+async def auction_sell_price(message: Message, state: FSMContext):
+    try:
+        price = int(message.text)
+        if price <= 0:
+            raise ValueError()
+    except ValueError:
+        await message.answer("❌ Введи положительное число!")
+        return
+
+    data = await state.get_data()
+    item_id = data.get('sell_item_id')
+    currency = data.get('sell_currency', 'balance')
+    user_id = message.from_user.id
+
+    # Проверяем наличие
+    inv = await get_forge_inventory(user_id)
+    qty = inv.get(item_id, 0)
+    if qty <= 0:
+        await state.clear()
+        await message.answer("❌ У тебя нет этого предмета!")
+        return
+
+    # Убираем 1 шт из инвентаря
+    ok = await remove_forge_item_from_user(user_id, item_id, 1)
+    if not ok:
+        await state.clear()
+        await message.answer("❌ Ошибка!")
+        return
+
+    # Создаём лот
+    async with aiosqlite.connect(DB_NAME) as db:
+        await db.execute('''
+            INSERT INTO auction_listings (seller_id, item_id, quantity, price, currency, is_standard, active, created_at)
+            VALUES (?, ?, 1, ?, ?, 0, 1, ?)
+        ''', (user_id, item_id, price, currency, datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
+        await db.commit()
+
+    await state.clear()
+    curr_name = CURRENCY_LABELS.get(currency, currency)
+    await message.answer(f"✅ Лот выставлен! 1 предмет за {price} {curr_name}")
+
+
+# --- ИНВЕНТАРЬ КУЗНИЦЫ ---
+@router.callback_query(F.data == "forge_inventory")
+async def forge_inventory_menu(callback: CallbackQuery, page: int = 0):
+    user_id = callback.from_user.id
+    inv = await get_forge_inventory(user_id)
+
+    if not inv:
+        await safe_edit_text(
+            callback.message,
+            "✌️ **Инвентарь кузницы**\n\n📭 Пусто!",
+            reply_markup=back_button("forge"),
+            parse_mode="Markdown"
+        )
+        return
+
+    per_page = 8
+    items_list = list(inv.items())
+    total = len(items_list)
+    start = page * per_page
+    end = start + per_page
+    page_items = items_list[start:end]
+
+    text = f"✌️ **Инвентарь кузницы** (стр. {page + 1})\n\n"
+    buttons = []
+
+    async with aiosqlite.connect(DB_NAME) as db:
+        db.row_factory = aiosqlite.Row
+        for item_id, qty in page_items:
+            async with db.execute("SELECT * FROM forge_items WHERE id = ?", (item_id,)) as cursor:
+                item = await cursor.fetchone()
+            if item:
+                text += f"• **{item['name']}** x{qty}\n"
+                buttons.append([InlineKeyboardButton(
+                    text=f"📦 {item['name']} x{qty}",
+                    callback_data=f"fiitem_{item_id}"
+                )])
+
+    nav = []
+    if page > 0:
+        nav.append(InlineKeyboardButton(text="⬅️", callback_data=f"fipage_{page - 1}"))
+    if end < total:
+        nav.append(InlineKeyboardButton(text="➡️", callback_data=f"fipage_{page + 1}"))
+    if nav:
+        buttons.append(nav)
+
+    buttons.append([InlineKeyboardButton(text="Назад ◀️◀️◀️", callback_data="forge")])
+    await safe_edit_text(callback.message, text, reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons), parse_mode="Markdown")
+
+
+@router.callback_query(F.data.startswith("fipage_"))
+async def forge_inventory_page(callback: CallbackQuery):
+    page = int(callback.data.replace("fipage_", ""))
+    await forge_inventory_menu(callback, page)
+
+
+@router.callback_query(F.data.startswith("fiitem_"))
+async def forge_inventory_item(callback: CallbackQuery):
+    """Подробности предмета из инвентаря кузницы."""
+    item_id = int(callback.data.replace("fiitem_", ""))
+    user_id = callback.from_user.id
+    item = await get_forge_item_by_id(item_id)
+
+    if not item:
+        await callback.answer("❌ Предмет не найден!", show_alert=True)
+        return
+
+    inv = await get_forge_inventory(user_id)
+    qty = inv.get(item_id, 0)
+
+    curr = CURRENCY_LABELS.get(item['currency'], item['currency'])
+    text = f"📦 **{item['name']}**\n\n"
+    text += f"Количество: **{qty}**\n"
+    text += f"Стандартная цена: {item['default_price']} {curr}\n"
+    if item['mine_chance'] > 0:
+        text += f"Шанс в шахте: {item['mine_chance']}%\n"
+    if item['smeltable'] and item['smelt_result_id']:
+        result = await get_forge_item_by_id(item['smelt_result_id'])
+        result_name = result['name'] if result else "???"
+        text += f"Переплавка: → {result_name} x{item['smelt_result_qty']}\n"
+
+    buttons = [[InlineKeyboardButton(text="Назад ◀️◀️◀️", callback_data="forge_inventory")]]
+    await safe_edit_text(callback.message, text, reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons), parse_mode="Markdown")
+
+
+# --- STUB: ИИ-ЕЖ ---
+@router.callback_query(F.data == "stub_ai")
+async def stub_ai_handler(callback: CallbackQuery):
+    await callback.answer("🚧 ИИ-ЕЖ в разработке!\nСледите за новостями.", show_alert=True)
 
 # =====================================
 # 🎰 КАЗИНО (ЕЖИНО)
@@ -6144,6 +7241,527 @@ async def admin_view_inventory(callback: CallbackQuery, state: FSMContext):
     await state.set_state(AdminStates.waiting_user_search)
     await state.update_data(action="view_inventory")
     await safe_edit_text(callback.message, "👀 Введи ID, @username или #номер игрока:", reply_markup=back_button("admin_folder_content"))
+
+
+# =====================================
+# ⚒️ АДМИНКА: КУЗНИЦА
+# =====================================
+
+@router.callback_query(F.data == "admin_forge")
+async def admin_forge_menu(callback: CallbackQuery):
+    if not await is_admin(callback.from_user.id):
+        return
+    await safe_edit_text(callback.message, "⚒️ **Кузница — Управление**", reply_markup=admin_forge_keyboard(), parse_mode="Markdown")
+
+
+@router.callback_query(F.data == "admin_forge_list")
+async def admin_forge_list(callback: CallbackQuery):
+    if not await is_admin(callback.from_user.id):
+        return
+    async with aiosqlite.connect(DB_NAME) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute("SELECT * FROM forge_items ORDER BY id") as cursor:
+            items = await cursor.fetchall()
+
+    if not items:
+        await callback.answer("📭 Нет предметов кузницы!", show_alert=True)
+        return
+
+    text = "📋 **Предметы кузницы:**\n\n"
+    for item in items:
+        flags = []
+        if item['auctionable']:
+            flags.append("🏪Аукцион")
+        if item['smeltable']:
+            flags.append("🔥Переплавка")
+        if item['mine_chance'] > 0:
+            flags.append(f"⛏️Шахта({item['mine_chance']}%)")
+        flag_str = " | ".join(flags) if flags else "—"
+        curr = CURRENCY_LABELS.get(item['currency'], item['currency'])
+        text += f"#{item['id']} **{item['name']}** — {item['default_price']} {curr}\n  {flag_str}\n\n"
+
+    await safe_edit_text(callback.message, text, reply_markup=back_button("admin_forge"), parse_mode="Markdown")
+
+
+# --- ДОБАВЛЕНИЕ ПРЕДМЕТА КУЗНИЦЫ (пошаговый FSM) ---
+@router.callback_query(F.data == "admin_add_forge_item")
+async def admin_add_forge_item_start(callback: CallbackQuery, state: FSMContext):
+    if not await is_admin(callback.from_user.id):
+        return
+    await state.set_state(ForgeStates.waiting_forge_item_name)
+    await safe_edit_text(callback.message, "➕ Введи название нового предмета кузницы:", reply_markup=back_button("admin_forge"))
+
+
+@router.message(ForgeStates.waiting_forge_item_name)
+async def admin_forge_item_name(message: Message, state: FSMContext):
+    if not await is_admin(message.from_user.id):
+        return
+    name = message.text.strip()
+    if not name:
+        await message.answer("❌ Введи название!")
+        return
+    await state.update_data(forge_item_name=name)
+    await state.set_state(ForgeStates.waiting_forge_item_price)
+    await message.answer(f"💰 Введи стандартную цену для «{name}»:", reply_markup=back_button("admin_forge"))
+
+
+@router.message(ForgeStates.waiting_forge_item_price)
+async def admin_forge_item_price(message: Message, state: FSMContext):
+    if not await is_admin(message.from_user.id):
+        return
+    try:
+        price = int(message.text)
+        if price < 0:
+            raise ValueError()
+    except ValueError:
+        await message.answer("❌ Введи неотрицательное число!")
+        return
+    await state.update_data(forge_item_price=price)
+    await state.set_state(ForgeStates.waiting_forge_item_currency)
+    await message.answer("💱 Выбери валюту:", reply_markup=auction_currency_keyboard("afcurr"))
+
+
+@router.callback_query(F.data.startswith("afcurr_"), ForgeStates.waiting_forge_item_currency)
+async def admin_forge_item_currency(callback: CallbackQuery, state: FSMContext):
+    if not await is_admin(callback.from_user.id):
+        return
+    currency = callback.data.replace("afcurr_", "")
+    await state.update_data(forge_item_currency=currency)
+    await state.set_state(ForgeStates.waiting_forge_item_mine_chance)
+    await safe_edit_text(
+        callback.message,
+        "⛏️ Введи шанс нахождения в шахте (%):\n\n0 = нет в шахте, число > 0 = шанс.\n"
+        "Шансы суммируются (например 2 предмета по 50% = 50/50).",
+        reply_markup=back_button("admin_forge")
+    )
+
+
+@router.message(ForgeStates.waiting_forge_item_mine_chance)
+async def admin_forge_item_mine_chance(message: Message, state: FSMContext):
+    if not await is_admin(message.from_user.id):
+        return
+    try:
+        chance = float(message.text)
+        if chance < 0:
+            raise ValueError()
+    except ValueError:
+        await message.answer("❌ Введи число >= 0!")
+        return
+    await state.update_data(forge_item_mine_chance=chance)
+    if chance > 0:
+        await state.set_state(ForgeStates.waiting_forge_item_mine_time)
+        await message.answer("⏱ Сколько секунд добывается в шахте?", reply_markup=back_button("admin_forge"))
+    else:
+        # Нет в шахте — пропускаем mine_time
+        await state.update_data(forge_item_mine_time=0)
+        await state.set_state(ForgeStates.waiting_forge_item_auctionable)
+        await message.answer(
+            "🏪 Можно ли купить на аукционе по стандартной цене? (да/нет)",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="✅ Да", callback_data="af_yes"),
+                 InlineKeyboardButton(text="❌ Нет", callback_data="af_no")]
+            ])
+        )
+
+
+@router.message(ForgeStates.waiting_forge_item_mine_time)
+async def admin_forge_item_mine_time(message: Message, state: FSMContext):
+    if not await is_admin(message.from_user.id):
+        return
+    try:
+        mine_time = int(message.text)
+        if mine_time < 1:
+            raise ValueError()
+    except ValueError:
+        await message.answer("❌ Введи положительное число (секунды)!")
+        return
+    await state.update_data(forge_item_mine_time=mine_time)
+    await state.set_state(ForgeStates.waiting_forge_item_auctionable)
+    await message.answer(
+        "🏪 Можно ли купить на аукционе по стандартной цене? (да/нет)",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="✅ Да", callback_data="af_yes"),
+             InlineKeyboardButton(text="❌ Нет", callback_data="af_no")]
+        ])
+    )
+
+
+@router.callback_query(F.data.in_(["af_yes", "af_no"]), ForgeStates.waiting_forge_item_auctionable)
+async def admin_forge_item_auctionable(callback: CallbackQuery, state: FSMContext):
+    if not await is_admin(callback.from_user.id):
+        return
+    auctionable = 1 if callback.data == "af_yes" else 0
+    await state.update_data(forge_item_auctionable=auctionable)
+    await state.set_state(ForgeStates.waiting_forge_item_smeltable)
+    await safe_edit_text(
+        callback.message,
+        "🔥 Можно ли переплавить? (да/нет)",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="✅ Да", callback_data="afs_yes"),
+             InlineKeyboardButton(text="❌ Нет", callback_data="afs_no")]
+        ])
+    )
+
+
+@router.callback_query(F.data.in_(["afs_yes", "afs_no"]), ForgeStates.waiting_forge_item_smeltable)
+async def admin_forge_item_smeltable(callback: CallbackQuery, state: FSMContext):
+    if not await is_admin(callback.from_user.id):
+        return
+    smeltable = 1 if callback.data == "afs_yes" else 0
+    await state.update_data(forge_item_smeltable=smeltable)
+
+    if smeltable:
+        # Нужно выбрать во что переплавляется
+        async with aiosqlite.connect(DB_NAME) as db:
+            db.row_factory = aiosqlite.Row
+            async with db.execute("SELECT id, name FROM forge_items ORDER BY id") as cursor:
+                items = await cursor.fetchall()
+
+        if not items:
+            # Нет предметов для выбора результата переплавки
+            await state.update_data(forge_item_smelt_result_id=None, forge_item_smelt_qty=0)
+            await _save_forge_item(callback.message, state)
+            return
+
+        await state.set_state(ForgeStates.waiting_forge_item_smelt_result)
+        buttons = []
+        for item in items:
+            buttons.append([InlineKeyboardButton(
+                text=f"→ {item['name']}",
+                callback_data=f"afsr_{item['id']}"
+            )])
+        buttons.append([InlineKeyboardButton(text="❌ Отмена", callback_data="admin_forge")])
+        await safe_edit_text(
+            callback.message,
+            "🔥 Во что переплавляется? Выбери предмет:",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons)
+        )
+    else:
+        await state.update_data(forge_item_smelt_result_id=None, forge_item_smelt_qty=0)
+        await _save_forge_item(callback.message, state)
+
+
+@router.callback_query(F.data.startswith("afsr_"), ForgeStates.waiting_forge_item_smelt_result)
+async def admin_forge_item_smelt_result(callback: CallbackQuery, state: FSMContext):
+    if not await is_admin(callback.from_user.id):
+        return
+    result_id = int(callback.data.replace("afsr_", ""))
+    await state.update_data(forge_item_smelt_result_id=result_id)
+    await state.set_state(ForgeStates.waiting_forge_item_smelt_qty)
+    await safe_edit_text(
+        callback.message,
+        "🔢 Сколько штук получается при переплавке?",
+        reply_markup=back_button("admin_forge")
+    )
+
+
+@router.message(ForgeStates.waiting_forge_item_smelt_qty)
+async def admin_forge_item_smelt_qty(message: Message, state: FSMContext):
+    if not await is_admin(message.from_user.id):
+        return
+    try:
+        qty = int(message.text)
+        if qty < 1:
+            raise ValueError()
+    except ValueError:
+        await message.answer("❌ Введи положительное число!")
+        return
+    await state.update_data(forge_item_smelt_qty=qty)
+    await _save_forge_item(message, state)
+
+
+async def _save_forge_item(message_or_callback_msg, state: FSMContext):
+    """Сохраняет предмет кузницы в БД."""
+    data = await state.get_data()
+    name = data['forge_item_name']
+    price = data['forge_item_price']
+    currency = data.get('forge_item_currency', 'balance')
+    mine_chance = data.get('forge_item_mine_chance', 0)
+    mine_time = data.get('forge_item_mine_time', 0)
+    auctionable = data.get('forge_item_auctionable', 0)
+    smeltable = data.get('forge_item_smeltable', 0)
+    smelt_result_id = data.get('forge_item_smelt_result_id')
+    smelt_result_qty = data.get('forge_item_smelt_qty', 0)
+
+    async with aiosqlite.connect(DB_NAME) as db:
+        try:
+            await db.execute('''
+                INSERT INTO forge_items (name, default_price, currency, mine_chance, mine_time,
+                    auctionable, smeltable, smelt_result_id, smelt_result_qty, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (name, price, currency, mine_chance, mine_time, auctionable, smeltable,
+                  smelt_result_id, smelt_result_qty, datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
+            await db.commit()
+            await state.clear()
+            await message_or_callback_msg.answer(
+                f"✅ Предмет кузницы «{name}» создан!\n"
+                f"💰 Цена: {price} {CURRENCY_LABELS.get(currency, currency)}\n"
+                f"⛏️ Шахта: {mine_chance}% ({mine_time}с)\n"
+                f"🏪 Аукцион: {'Да' if auctionable else 'Нет'}\n"
+                f"🔥 Переплавка: {'Да' if smeltable else 'Нет'}",
+                reply_markup=admin_forge_keyboard()
+            )
+        except Exception as e:
+            await state.clear()
+            await message_or_callback_msg.answer(f"❌ Ошибка: {e}", reply_markup=admin_forge_keyboard())
+
+
+# --- УДАЛЕНИЕ ПРЕДМЕТА КУЗНИЦЫ ---
+@router.callback_query(F.data == "admin_del_forge_item")
+async def admin_del_forge_item(callback: CallbackQuery):
+    if not await is_admin(callback.from_user.id):
+        return
+    async with aiosqlite.connect(DB_NAME) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute("SELECT * FROM forge_items ORDER BY id") as cursor:
+            items = await cursor.fetchall()
+
+    if not items:
+        await callback.answer("📭 Нет предметов!", show_alert=True)
+        return
+
+    buttons = []
+    for item in items[:20]:
+        buttons.append([InlineKeyboardButton(
+            text=f"🗑 {item['name']}",
+            callback_data=f"delfi_{item['id']}",
+            style=ButtonStyle.DANGER
+        )])
+    buttons.append([InlineKeyboardButton(text="🔙 Назад", callback_data="admin_forge")])
+    await safe_edit_text(callback.message, "🗑 Выбери предмет для удаления:", reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons))
+
+
+@router.callback_query(F.data.startswith("delfi_"))
+async def delete_forge_item(callback: CallbackQuery):
+    if not await is_admin(callback.from_user.id):
+        return
+    item_id = int(callback.data.replace("delfi_", ""))
+    async with aiosqlite.connect(DB_NAME) as db:
+        async with db.execute("SELECT name FROM forge_items WHERE id = ?", (item_id,)) as cursor:
+            item = await cursor.fetchone()
+        if item:
+            await db.execute("DELETE FROM forge_items WHERE id = ?", (item_id,))
+            await db.execute("DELETE FROM forge_inventory WHERE item_id = ?", (item_id,))
+            await db.execute("DELETE FROM craft_ingredients WHERE item_id = ?", (item_id,))
+            await db.execute("DELETE FROM auction_listings WHERE item_id = ?", (item_id,))
+            await db.commit()
+            await callback.answer(f"✅ «{item[0]}» удалён!", show_alert=True)
+    await admin_del_forge_item(callback)
+
+
+# --- УПРАВЛЕНИЕ КРАФТАМИ ---
+@router.callback_query(F.data == "admin_crafts")
+async def admin_crafts_menu(callback: CallbackQuery):
+    if not await is_admin(callback.from_user.id):
+        return
+    async with aiosqlite.connect(DB_NAME) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute("SELECT * FROM crafts ORDER BY id") as cursor:
+            crafts = await cursor.fetchall()
+
+    buttons = [[InlineKeyboardButton(text="➕ Создать крафт", callback_data="admin_add_craft", style=ButtonStyle.SUCCESS)]]
+
+    if crafts:
+        for craft in crafts:
+            async with aiosqlite.connect(DB_NAME) as db:
+                async with db.execute("SELECT name FROM forge_items WHERE id = ?", (craft['result_item_id'],)) as cursor:
+                    result = await cursor.fetchone()
+            result_name = result['name'] if result else "???"
+            buttons.append([InlineKeyboardButton(
+                text=f"🗑 {craft['name']} → {result_name} x{craft['result_qty']}",
+                callback_data=f"delcraft_{craft['id']}",
+                style=ButtonStyle.DANGER
+            )])
+
+    buttons.append([InlineKeyboardButton(text="🔙 Назад", callback_data="admin_forge")])
+    await safe_edit_text(callback.message, "🔧 **Управление крафтами**", reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons), parse_mode="Markdown")
+
+
+@router.callback_query(F.data == "admin_add_craft")
+async def admin_add_craft_start(callback: CallbackQuery, state: FSMContext):
+    if not await is_admin(callback.from_user.id):
+        return
+    async with aiosqlite.connect(DB_NAME) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute("SELECT id, name FROM forge_items ORDER BY id") as cursor:
+            items = await cursor.fetchall()
+
+    if not items:
+        await callback.answer("❌ Сначала создай хотя бы 1 предмет кузницы!", show_alert=True)
+        return
+
+    await state.set_state(ForgeStates.waiting_craft_name)
+    await safe_edit_text(callback.message, "🔧 Введи название крафта:", reply_markup=back_button("admin_crafts"))
+
+
+@router.message(ForgeStates.waiting_craft_name)
+async def admin_craft_name(message: Message, state: FSMContext):
+    if not await is_admin(message.from_user.id):
+        return
+    name = message.text.strip()
+    if not name:
+        await message.answer("❌ Введи название!")
+        return
+    await state.update_data(craft_name=name)
+
+    # Выбираем результат крафта
+    async with aiosqlite.connect(DB_NAME) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute("SELECT id, name FROM forge_items ORDER BY id") as cursor:
+            items = await cursor.fetchall()
+
+    buttons = []
+    for item in items:
+        buttons.append([InlineKeyboardButton(text=f"→ {item['name']}", callback_data=f"acr_{item['id']}")])
+    buttons.append([InlineKeyboardButton(text="❌ Отмена", callback_data="admin_crafts")])
+
+    await state.set_state(ForgeStates.waiting_craft_result)
+    await message.answer("🎯 Выбери предмет-результат крафта:", reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons))
+
+
+@router.callback_query(F.data.startswith("acr_"), ForgeStates.waiting_craft_result)
+async def admin_craft_result(callback: CallbackQuery, state: FSMContext):
+    if not await is_admin(callback.from_user.id):
+        return
+    result_id = int(callback.data.replace("acr_", ""))
+    await state.update_data(craft_result_id=result_id)
+    await state.set_state(ForgeStates.waiting_craft_result_qty)
+    await safe_edit_text(callback.message, "🔢 Сколько штук получается?", reply_markup=back_button("admin_crafts"))
+
+
+@router.message(ForgeStates.waiting_craft_result_qty)
+async def admin_craft_result_qty(message: Message, state: FSMContext):
+    if not await is_admin(message.from_user.id):
+        return
+    try:
+        qty = int(message.text)
+        if qty < 1:
+            raise ValueError()
+    except ValueError:
+        await message.answer("❌ Введи положительное число!")
+        return
+    await state.update_data(craft_result_qty=qty)
+    await state.set_state(ForgeStates.waiting_craft_ingredient)
+    await message.answer(
+        "🧪 Теперь добавим ингредиенты.\n\n"
+        "Введи ингредиент в формате: `название количество`\n"
+        "Например: `Железо 3`\n\n"
+        "Когда закончишь — напиши `готово`",
+        reply_markup=back_button("admin_crafts"),
+        parse_mode="Markdown"
+    )
+
+
+@router.message(ForgeStates.waiting_craft_ingredient)
+async def admin_craft_ingredient(message: Message, state: FSMContext):
+    if not await is_admin(message.from_user.id):
+        return
+    text = message.text.strip().lower()
+
+    if text == "готово":
+        await _save_craft(message, state)
+        return
+
+    # Парсим "название количество"
+    parts = message.text.strip().rsplit(" ", 1)
+    if len(parts) != 2:
+        await message.answer("❌ Формат: `название количество`\nНапример: `Железо 3`", parse_mode="Markdown")
+        return
+
+    item_name, qty_str = parts
+    try:
+        qty = int(qty_str)
+        if qty < 1:
+            raise ValueError()
+    except ValueError:
+        await message.answer("❌ Количество должно быть положительным числом!")
+        return
+
+    # Ищем предмет
+    async with aiosqlite.connect(DB_NAME) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute("SELECT id, name FROM forge_items WHERE LOWER(name) = ?", (item_name.lower(),)) as cursor:
+            item = await cursor.fetchone()
+
+    if not item:
+        await message.answer(f"❌ Предмет «{item_name}» не найден! Проверь название.")
+        return
+
+    # Добавляем ингредиент в список
+    data = await state.get_data()
+    ingredients = data.get('craft_ingredients', [])
+    ingredients.append({'item_id': item['id'], 'name': item['name'], 'qty': qty})
+    await state.update_data(craft_ingredients=ingredients)
+
+    ing_list = ", ".join(f"{ing['name']} x{ing['qty']}" for ing in ingredients)
+    await message.answer(
+        f"✅ Добавлено: {item['name']} x{qty}\n\n"
+        f"Текущие ингредиенты: {ing_list}\n\n"
+        f"Добавь ещё или напиши `готово`",
+        parse_mode="Markdown"
+    )
+
+
+async def _save_craft(message: Message, state: FSMContext):
+    """Сохраняет крафт в БД."""
+    data = await state.get_data()
+    craft_name = data.get('craft_name', 'Крафт')
+    result_id = data.get('craft_result_id')
+    result_qty = data.get('craft_result_qty', 1)
+    ingredients = data.get('craft_ingredients', [])
+
+    if not result_id:
+        await state.clear()
+        await message.answer("❌ Ошибка: не выбран результат!")
+        return
+
+    if not ingredients:
+        await state.clear()
+        await message.answer("❌ Нужен хотя бы 1 ингредиент!")
+        return
+
+    async with aiosqlite.connect(DB_NAME) as db:
+        cursor = await db.execute('''
+            INSERT INTO crafts (name, result_item_id, result_qty, created_at)
+            VALUES (?, ?, ?, ?)
+        ''', (craft_name, result_id, result_qty, datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
+        craft_id = cursor.lastrowid
+
+        for ing in ingredients:
+            await db.execute('''
+                INSERT INTO craft_ingredients (craft_id, item_id, quantity)
+                VALUES (?, ?, ?)
+            ''', (craft_id, ing['item_id'], ing['qty']))
+
+        await db.commit()
+
+    await state.clear()
+    ing_text = ", ".join(f"{ing['name']} x{ing['qty']}" for ing in ingredients)
+    async with aiosqlite.connect(DB_NAME) as db:
+        async with db.execute("SELECT name FROM forge_items WHERE id = ?", (result_id,)) as cursor:
+            result = await cursor.fetchone()
+    result_name = result['name'] if result else "???"
+
+    await message.answer(
+        f"✅ Крафт создан!\n\n"
+        f"🔧 **{craft_name}** → {result_name} x{result_qty}\n"
+        f"Ингредиенты: {ing_text}",
+        reply_markup=admin_forge_keyboard(),
+        parse_mode="Markdown"
+    )
+
+
+@router.callback_query(F.data.startswith("delcraft_"))
+async def delete_craft(callback: CallbackQuery):
+    if not await is_admin(callback.from_user.id):
+        return
+    craft_id = int(callback.data.replace("delcraft_", ""))
+    async with aiosqlite.connect(DB_NAME) as db:
+        await db.execute("DELETE FROM craft_ingredients WHERE craft_id = ?", (craft_id,))
+        await db.execute("DELETE FROM crafts WHERE id = ?", (craft_id,))
+        await db.commit()
+    await callback.answer("✅ Крафт удалён!", show_alert=True)
+    await admin_crafts_menu(callback)
 
 
 # =====================================
