@@ -17,7 +17,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Копируем код бота
 COPY Bot.py .
 
-# Том для базы данных
-VOLUME /app/data
+# Копируем базу данных
+COPY hedgehog_bot.db .
 
 CMD ["python", "Bot.py"]
