@@ -1241,7 +1241,7 @@ def star_field_keyboard(field: list, revealed: list):
             else:
                 row_buttons.append(InlineKeyboardButton(text="❓", callback_data=f"star_{idx}"))
         buttons.append(row_buttons)
-    buttons.append([InlineKeyboardButton(text="💰 Забрать выигрыш", callback_data="star_end")])
+    buttons.append([InlineKeyboardButton(text="💰 Забрать выигрыш", callback_data="star_end"), InlineKeyboardButton(text="❌ Отмена", callback_data="casino")])
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 
@@ -1518,12 +1518,15 @@ async def safe_edit_text(message: Message, text: str, reply_markup=None, parse_m
             except:
                 pass
             
-            if media_type == 'photo':
-                await message.answer_photo(file_id, caption=text, reply_markup=reply_markup, parse_mode=parse_mode)
-                return
-            elif media_type == 'video':
-                await message.answer_video(file_id, caption=text, reply_markup=reply_markup, parse_mode=parse_mode)
-                return
+            try:
+                if media_type == 'photo':
+                    await message.answer_photo(file_id, caption=text, reply_markup=reply_markup, parse_mode=parse_mode)
+                    return
+                elif media_type == 'video':
+                    await message.answer_video(file_id, caption=text, reply_markup=reply_markup, parse_mode=parse_mode)
+                    return
+            except:
+                pass  # Медиа не отправилось — падаем на текстовый fallback
     
     # Обычное поведение
     try:
@@ -1560,7 +1563,14 @@ async def check_access(bot_instance: Bot, user_id: int, callback: CallbackQuery 
     
     # Получаем пользователя для проверки статуса
     user = await get_user(user_id)
-    if user and user['status'] != 'alive':
+    if not user:
+        text = "❌ Нажмите /start сначала!"
+        if callback:
+            await callback.answer(text, show_alert=True)
+        elif message:
+            await message.answer(text)
+        return False
+    if user['status'] != 'alive':
         # Если мертв/продан/на хранении
         # Разрешаем только админам доступ к админке, остальным - только "Посмертие"
         
@@ -1579,6 +1589,7 @@ async def check_access(bot_instance: Bot, user_id: int, callback: CallbackQuery 
             "🙏 Попросить Денег", 
             "💰 Баланс", 
             "🆕 Купить Ежа",
+            "🧪 Dev Test",
             "🛠 Панель"
         ]
         
@@ -1706,10 +1717,13 @@ async def cmd_start(message: Message, command: CommandObject, state: FSMContext)
     await message.answer(text, reply_markup=main_reply_keyboard(is_user_admin, is_fake))
     
     if media_info:
-        if media_info['media_type'] == 'photo':
-            await message.answer_photo(media_info['file_id'], caption="Вот меню бота:", reply_markup=main_menu_keyboard(is_user_admin))
-        elif media_info['media_type'] == 'video':
-            await message.answer_video(media_info['file_id'], caption="Вот меню бота:", reply_markup=main_menu_keyboard(is_user_admin))
+        try:
+            if media_info['media_type'] == 'photo':
+                await message.answer_photo(media_info['file_id'], caption="Вот меню бота:", reply_markup=main_menu_keyboard(is_user_admin))
+            elif media_info['media_type'] == 'video':
+                await message.answer_video(media_info['file_id'], caption="Вот меню бота:", reply_markup=main_menu_keyboard(is_user_admin))
+        except:
+            await message.answer("Вот меню бота:", reply_markup=main_menu_keyboard(is_user_admin))
     else:
         await message.answer("Вот меню бота:", reply_markup=main_menu_keyboard(is_user_admin))
         
@@ -2024,10 +2038,13 @@ async def reply_casino(message: Message, state: FSMContext):
     )
     
     if media_info:
-         if media_info['media_type'] == 'photo':
-            await message.answer_photo(media_info['file_id'], caption=text, reply_markup=casino_keyboard())
-         else:
-            await message.answer_video(media_info['file_id'], caption=text, reply_markup=casino_keyboard())
+        try:
+            if media_info['media_type'] == 'photo':
+                await message.answer_photo(media_info['file_id'], caption=text, reply_markup=casino_keyboard())
+            else:
+                await message.answer_video(media_info['file_id'], caption=text, reply_markup=casino_keyboard())
+        except:
+            await message.answer(text, reply_markup=casino_keyboard())
     else:
         await message.answer(text, reply_markup=casino_keyboard())
 
@@ -2352,6 +2369,36 @@ async def do_pet(callback: CallbackQuery):
 # =====================================
 # 🦔 МОЙ ЕЖ (Кастомизация + Store/Sell)
 # =====================================
+
+@router.callback_query(F.data == "my_hedgehog")
+async def callback_my_hedgehog(callback: CallbackQuery, state: FSMContext):
+    await state.clear()
+    if not await check_access(bot, callback.from_user.id, callback):
+        return
+    user = await get_user(callback.from_user.id)
+    if not user:
+        await callback.answer("❌ Нажмите /start сначала!", show_alert=True)
+        return
+    join_date = datetime.strptime(user['join_date'], "%Y-%m-%d %H:%M:%S")
+    days_in_bot = (datetime.now() - join_date).days
+    injured_text = "\n\n🩹 Твоя рука поранена! Купи аптечку в магазине!" if user['is_injured'] else ""
+    cls_name = CLASSES.get(user['hedgehog_class'], {'name': 'Unknown'})['name']
+    await safe_edit_text(
+        callback.message,
+        f"🦔 Это ваш ежик! 🦔\n"
+        f"Класс: {cls_name}\n"
+        f"🎫 Номер игрока: {format_player_number(user['player_number'])}\n"
+        f"🧸 Имя ежа: {user['hedgehog_name']}\n"
+        f"🎨 Цвет иголок: {user['hedgehog_color']}\n"
+        f"🍖 Сытость: {int(user['satiety'])}%\n"
+        f"🕘 Дней в боте с ежиком 🦔 - {days_in_bot}\n"
+        f"🐘 Кожа слона: {user['elephant_skin']}\n"
+        f"💎 Алмазы: {user['diamonds']}\n"
+        f"👬 Приглашено друзей: {user['referrals_count']}\n"
+        f"👬🎁 Заработано с друзей: {user['referrals_earned']} Ежидзиков👍{injured_text}",
+        reply_markup=my_hedgehog_keyboard(user['hedgehog_class'])
+    )
+
 
 @router.callback_query(F.data == "customize")
 async def customize(callback: CallbackQuery, state: FSMContext):
