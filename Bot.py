@@ -1528,8 +1528,8 @@ async def safe_edit_text(message: Message, text: str, reply_markup=None, parse_m
                 elif media_type == 'video':
                     await message.answer_video(file_id, caption=text, reply_markup=reply_markup, parse_mode=parse_mode)
                     return
-            except:
-                pass  # Медиа не отправилось — падаем на текстовый fallback
+            except Exception as e:
+                print(f"⚠️ safe_edit_text: медиа не отправилось ({e}), fallback на текст")
     
     # Обычное поведение
     try:
@@ -1539,12 +1539,16 @@ async def safe_edit_text(message: Message, text: str, reply_markup=None, parse_m
             await message.answer(text, reply_markup=reply_markup, parse_mode=parse_mode)
         else:
             await message.edit_text(text, reply_markup=reply_markup, parse_mode=parse_mode)
-    except:
+    except Exception as e:
+        print(f"⚠️ safe_edit_text: edit не удался ({e}), пробуем delete+answer")
         try:
             await message.delete()
         except:
             pass
-        await message.answer(text, reply_markup=reply_markup, parse_mode=parse_mode)
+        try:
+            await message.answer(text, reply_markup=reply_markup, parse_mode=parse_mode)
+        except Exception as e2:
+            print(f"❌ safe_edit_text: и answer не удался: {e2}")
 
 
 async def safe_delete(message: Message):
@@ -1630,92 +1634,104 @@ async def check_access(bot_instance: Bot, user_id: int, callback: CallbackQuery 
 
 @router.message(CommandStart())
 async def cmd_start(message: Message, command: CommandObject, state: FSMContext):
-    await state.clear()
-    user_id = message.from_user.id
-    username = message.from_user.username or "Unknown"
-    
-    is_banned, ban_reason = await check_user_banned(user_id)
-    if is_banned:
-        await message.answer(f"🚫 Вы заблокированы!\n\nПричина: {ban_reason or 'Не указана'}")
-        return
-    
-    if await check_maintenance() and not await is_admin(user_id):
-        await message.answer("🔧 Ведутся технические работы!\n\nПопробуйте позже.")
-        return
-    
+    print(f"🔔 /start от user_id={message.from_user.id}")
     try:
-        await update_username(user_id, username)
-    except Exception:
-        pass
-    try:
-        await ensure_main_admin(username)
-    except Exception:
-        pass
-    
-    # Обработка рефералов и диплинков
-    args = command.args
-    referrer_id = None
-    promo_to_activate = None
-    
-    if args:
-        if args.startswith("promo_"):
-            promo_to_activate = args.replace("promo_", "")
-        else:
-            try:
-                referrer_id = int(args)
-                if referrer_id == user_id:
-                    referrer_id = None
-            except:
-                pass
-    
-    user = await get_user(user_id)
-    if not user:
-        player_num = await create_user(user_id, username, referrer_id)
-        if referrer_id:
-            try:
-                await bot.send_message(
-                    referrer_id,
-                    f"🎉 По вашей ссылке зарегистрировался новый пользователь!\n"
-                    f"💰 +20 Ежидзиков👍\n"
-                    f"🐜 +0.3% к шансу поймать муравья\n"
-                    f"📺 х2 доход с рекламы на 20 минут!"
-                )
-            except:
-                pass
-        user = await get_user(user_id)
-    
-    if not user:
-        await message.answer("❌ Ошибка регистрации. Попробуйте ещё раз.")
-        return
-
-    # Авто-активация промо из диплинка
-    if promo_to_activate:
-        pass # Обработаем ниже
-
-    is_user_admin = await is_admin(user_id)
-    is_fake = await is_fake_admin(user_id)
-    
-    # Проверка статуса (v3.8)
-    if user['status'] != 'alive':
-        await message.answer("🪦 Вы в посмертии...", reply_markup=death_reply_keyboard())
-        if promo_to_activate:
-             await process_promocode(message, user_id, promo_to_activate)
-        return
-
-    # Отправляем reply-клавиатуру и inline-меню
-    try:
-        text = f"Привет! 👋🦔\nТвой номер игрока: {format_player_number(user['player_number'])}"
-        await message.answer(text, reply_markup=main_reply_keyboard(is_user_admin, is_fake))
-        await message.answer("Вот меню бота:", reply_markup=main_menu_keyboard(is_user_admin))
-    except Exception as e:
-        print(f"❌ Ошибка показа меню в cmd_start: {e}")
+        await state.clear()
+        user_id = message.from_user.id
+        username = message.from_user.username or "Unknown"
+        
+        is_banned, ban_reason = await check_user_banned(user_id)
+        if is_banned:
+            await message.answer(f"🚫 Вы заблокированы!\n\nПричина: {ban_reason or 'Не указана'}")
+            return
+        
+        if await check_maintenance() and not await is_admin(user_id):
+            await message.answer("🔧 Ведутся технические работы!\n\nПопробуйте позже.")
+            return
+        
         try:
-            await message.answer("Вот меню бота:", reply_markup=main_menu_keyboard(is_user_admin))
-        except:
+            await update_username(user_id, username)
+        except Exception:
+            pass
+        try:
+            await ensure_main_admin(username)
+        except Exception:
             pass
         
-    if promo_to_activate:
-        await process_promocode(message, user_id, promo_to_activate)
+        # Обработка рефералов и диплинков
+        args = command.args
+        referrer_id = None
+        promo_to_activate = None
+        
+        if args:
+            if args.startswith("promo_"):
+                promo_to_activate = args.replace("promo_", "")
+            else:
+                try:
+                    referrer_id = int(args)
+                    if referrer_id == user_id:
+                        referrer_id = None
+                except:
+                    pass
+        
+        user = await get_user(user_id)
+        if not user:
+            player_num = await create_user(user_id, username, referrer_id)
+            if referrer_id:
+                try:
+                    await bot.send_message(
+                        referrer_id,
+                        f"🎉 По вашей ссылке зарегистрировался новый пользователь!\n"
+                        f"💰 +20 Ежидзиков👍\n"
+                        f"🐜 +0.3% к шансу поймать муравья\n"
+                        f"📺 х2 доход с рекламы на 20 минут!"
+                    )
+                except:
+                    pass
+            user = await get_user(user_id)
+        
+        if not user:
+            await message.answer("❌ Ошибка регистрации. Попробуйте ещё раз.")
+            return
+
+        # Авто-активация промо из диплинка
+        if promo_to_activate:
+            pass # Обработаем ниже
+
+        is_user_admin = await is_admin(user_id)
+        is_fake = await is_fake_admin(user_id)
+        
+        # Проверка статуса (v3.8)
+        if user['status'] != 'alive':
+            await message.answer("🪦 Вы в посмертии...", reply_markup=death_reply_keyboard())
+            if promo_to_activate:
+                 await process_promocode(message, user_id, promo_to_activate)
+            return
+
+        # Отправляем reply-клавиатуру и inline-меню
+        try:
+            text = f"Привет! 👋🦔\nТвой номер игрока: {format_player_number(user['player_number'])}"
+            await message.answer(text, reply_markup=main_reply_keyboard(is_user_admin, is_fake))
+            await message.answer("Вот меню бота:", reply_markup=main_menu_keyboard(is_user_admin))
+        except Exception as e:
+            print(f"❌ Ошибка показа меню в cmd_start: {e}")
+            import traceback
+            traceback.print_exc()
+            try:
+                await message.answer("Вот меню бота:", reply_markup=main_menu_keyboard(is_user_admin))
+            except Exception as e2:
+                print(f"❌ Повторная ошибка меню: {e2}")
+            
+        if promo_to_activate:
+            await process_promocode(message, user_id, promo_to_activate)
+    except Exception as e:
+        print(f"❌ КРИТИЧЕСКАЯ ОШИБКА cmd_start: {e}")
+        import traceback
+        traceback.print_exc()
+        try:
+            await message.answer("❌ Произошла ошибка. Попробуйте ещё раз.")
+        except:
+            pass
 
 
 @router.callback_query(F.data == "check_subscription")
@@ -1747,6 +1763,7 @@ async def check_sub_callback(callback: CallbackQuery, state: FSMContext):
 
 @router.callback_query(F.data == "menu")
 async def show_menu(callback: CallbackQuery, state: FSMContext):
+    print(f"🔔 menu callback от user_id={callback.from_user.id}")
     await state.clear()
     if not await check_access(bot, callback.from_user.id, callback):
         return
@@ -1764,11 +1781,12 @@ async def show_menu(callback: CallbackQuery, state: FSMContext):
             reply_markup=main_menu_keyboard(is_user_admin),
             media_screen="menu"
         )
-    except Exception:
+    except Exception as e:
+        print(f"❌ Ошибка show_menu: {e}")
         try:
             await callback.message.answer("Вот меню бота:", reply_markup=main_menu_keyboard(is_user_admin))
-        except:
-            pass
+        except Exception as e2:
+            print(f"❌ Повторная ошибка show_menu: {e2}")
 
 
 @router.callback_query(F.data == "noop")
@@ -6620,6 +6638,21 @@ async def main():
         await init_db()
         print("✅ База данных инициализирована")
         
+        # Удаляем вебхук и сбрасываем ожидающие обновления (на случай конфликта инстансов)
+        try:
+            await bot.delete_webhook(drop_pending_updates=True)
+            print("✅ Вебхук удалён, pending updates сброшены")
+        except Exception as e:
+            print(f"⚠️ Не удалось удалить вебхук: {e}")
+        
+        # Проверяем подключение к Telegram
+        try:
+            me = await bot.get_me()
+            print(f"✅ Подключение к Telegram OK: @{me.username} (id: {me.id})")
+        except Exception as e:
+            print(f"❌ Не удалось подключиться к Telegram API: {e}")
+            return
+        
         # Start background tasks
         asyncio.create_task(ant_income_loop())
         asyncio.create_task(hunger_loop())
@@ -6631,7 +6664,7 @@ async def main():
         print(f"📢 Канал: {CHANNEL_LINK}")
         print("=" * 50)
         
-        await dp.start_polling(bot)
+        await dp.start_polling(bot, handle_updates_errors=True)
     except Exception as e:
         print(f"❌ ФАТАЛЬНАЯ ОШИБКА: {e}")
         import traceback
