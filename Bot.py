@@ -848,15 +848,6 @@ def main_reply_keyboard(is_admin: bool = False, is_fake_admin: bool = False):
     return ReplyKeyboardMarkup(keyboard=buttons, resize_keyboard=True)
 
 
-def puzzle_reply_keyboard():
-    buttons = [
-        [KeyboardButton(text="🏠 Меню", style=ButtonStyle.PRIMARY)],
-        [KeyboardButton(text="🛒 Магазин"), KeyboardButton(text="⚒️ Кузница")],
-        [KeyboardButton(text="🤖 ИИ-ЕЖ")],
-        [KeyboardButton(text="Image Test")]
-    ]
-    return ReplyKeyboardMarkup(keyboard=buttons, resize_keyboard=True)
-
 def death_reply_keyboard():
     # Удалена кнопка Рекламы для хардкора в Survival Update
     buttons = [
@@ -2151,8 +2142,7 @@ async def reply_puzzle(message: Message, state: FSMContext):
         "устаревшие функции, и функции, которые находятся в бете!\n\n"
         "Выбери раздел из кнопок ниже 👇"
     )
-    await message.answer(full_text, reply_markup=puzzle_reply_keyboard())
-    await message.answer("🧩 Разделы пазла:", reply_markup=puzzle_keyboard())
+    await message.answer(full_text, reply_markup=puzzle_keyboard())
 
 
 @router.callback_query(F.data == "puzzle")
@@ -2173,63 +2163,6 @@ async def puzzle_callback(callback: CallbackQuery, state: FSMContext):
         await callback.message.answer(full_text, reply_markup=puzzle_keyboard())
     except Exception:
         await safe_edit_text(callback.message, full_text, reply_markup=puzzle_keyboard())
-    # Также обновляем reply-клавиатуру
-    try:
-        await callback.message.answer("⬇️ Пазл-режим активен", reply_markup=puzzle_reply_keyboard())
-    except Exception:
-        pass
-
-
-@router.message(F.text == "🛒 Магазин")
-async def reply_shop(message: Message, state: FSMContext):
-    await state.clear()
-    if not await check_access(bot, message.from_user.id, message=message):
-        return
-    # Переиспользуем логику магазина
-    user = await get_user(message.from_user.id)
-    if not user:
-        await message.answer("❌ Вы не зарегистрированы! Нажмите /start")
-        return
-    
-    async with aiosqlite.connect(DB_NAME) as db:
-        db.row_factory = aiosqlite.Row
-        async with db.execute("SELECT * FROM shop_items ORDER BY price ASC") as cursor:
-            items = await cursor.fetchall()
-    
-    if not items:
-        await message.answer("🛒 Магазин пуст!", reply_markup=back_button("puzzle"))
-        return
-    
-    text = "🛒 Магазин 🛒\n\n"
-    for item in items:
-        curr = CURRENCY_LABELS.get(item['currency'], item['currency'])
-        text += f"• {item['name']} — {item['price']} {curr}\n"
-    text += "\nНажми на предмет для покупки!"
-    
-    # Собираем inline-клавиатуру магазина
-    shop_buttons = []
-    for item in items:
-        shop_buttons.append([InlineKeyboardButton(text=f"{item['name']} ({item['price']})", callback_data=f"shop_item_{item['id']}")])
-    shop_buttons.append([InlineKeyboardButton(text="🎒 Инвентарь", callback_data="inventory")])
-    shop_buttons.append([InlineKeyboardButton(text="Назад ◀️◀️◀️", callback_data="puzzle")])
-    
-    await message.answer(text, reply_markup=InlineKeyboardMarkup(inline_keyboard=shop_buttons))
-
-
-@router.message(F.text == "⚒️ Кузница")
-async def reply_forge(message: Message, state: FSMContext):
-    await state.clear()
-    if not await check_access(bot, message.from_user.id, message=message):
-        return
-    await message.answer("⚒️ Кузница пока в разработке! Следите за обновлениями 🧩")
-
-
-@router.message(F.text == "🤖 ИИ-ЕЖ")
-async def reply_ai_hedgehog(message: Message, state: FSMContext):
-    await state.clear()
-    if not await check_access(bot, message.from_user.id, message=message):
-        return
-    await message.answer("🤖 ИИ-ЕЖ пока в бета-тестировании! Скоро будет доступен 🧩")
 
 
 @router.message(F.text == "🛠 Панель")
