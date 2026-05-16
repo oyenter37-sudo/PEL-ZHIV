@@ -3725,13 +3725,12 @@ async def craft_search_process(message: Message, state: FSMContext):
     await state.clear()
     query = message.text.strip().lower()
 
+    # LOWER() в SQLite не работает с кириллицей — фильтруем в Python
     async with aiosqlite.connect(DB_NAME) as db:
         db.row_factory = aiosqlite.Row
-        async with db.execute(
-            "SELECT * FROM crafts WHERE LOWER(name) LIKE ? ORDER BY id",
-            (f"%{query}%",)
-        ) as cursor:
-            crafts = await cursor.fetchall()
+        async with db.execute("SELECT * FROM crafts ORDER BY id") as cursor:
+            all_crafts = await cursor.fetchall()
+    crafts = [c for c in all_crafts if query in c['name'].lower()]
 
     if not crafts:
         await message.answer("🔍 Ничего не найдено!", reply_markup=back_button("forge_crafts"))
@@ -7677,11 +7676,17 @@ async def admin_craft_ingredient(message: Message, state: FSMContext):
         await message.answer("❌ Количество должно быть положительным числом!")
         return
 
-    # Ищем предмет
+    # Ищем предмет (регистронезависимо, LOWER в SQLite не работает с кириллицей)
+    item_name_lower = item_name.lower()
     async with aiosqlite.connect(DB_NAME) as db:
         db.row_factory = aiosqlite.Row
-        async with db.execute("SELECT id, name FROM forge_items WHERE LOWER(name) = ?", (item_name.lower(),)) as cursor:
-            item = await cursor.fetchone()
+        async with db.execute("SELECT id, name FROM forge_items") as cursor:
+            all_items = await cursor.fetchall()
+    item = None
+    for fi in all_items:
+        if fi['name'].lower() == item_name_lower:
+            item = fi
+            break
 
     if not item:
         await message.answer(f"❌ Предмет «{item_name}» не найден! Проверь название.")
