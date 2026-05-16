@@ -7563,6 +7563,7 @@ async def admin_crafts_menu(callback: CallbackQuery):
     if crafts:
         for craft in crafts:
             async with aiosqlite.connect(DB_NAME) as db:
+                db.row_factory = aiosqlite.Row
                 async with db.execute("SELECT name FROM forge_items WHERE id = ?", (craft['result_item_id'],)) as cursor:
                     result = await cursor.fetchone()
             result_name = result['name'] if result else "???"
@@ -7743,6 +7744,7 @@ async def _save_craft(message: Message, state: FSMContext):
     await state.clear()
     ing_text = ", ".join(f"{ing['name']} x{ing['qty']}" for ing in ingredients)
     async with aiosqlite.connect(DB_NAME) as db:
+        db.row_factory = aiosqlite.Row
         async with db.execute("SELECT name FROM forge_items WHERE id = ?", (result_id,)) as cursor:
             result = await cursor.fetchone()
     result_name = result['name'] if result else "???"
