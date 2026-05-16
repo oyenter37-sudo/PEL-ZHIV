@@ -1614,7 +1614,7 @@ async def check_access(bot_instance: Bot, user_id: int, callback: CallbackQuery 
         # Разрешаем только админам доступ к админке, остальным - только "Посмертие"
         
         is_death_action = callback and (
-            callback.data in ["watch_ad_death", "death_menu_back"] or 
+            callback.data in ["death_menu_back"] or 
             callback.data.startswith("buy_class_")
         )
         is_admin_action = callback and callback.data.startswith("admin_") and await is_admin(user_id)
@@ -1823,7 +1823,7 @@ async def show_menu(callback: CallbackQuery, state: FSMContext):
 
 @router.callback_query(F.data == "noop")
 async def noop_callback(callback: CallbackQuery):
-    await callback.answer()
+    pass  # middleware auto-answers
 
 
 # =====================================
@@ -2043,7 +2043,7 @@ async def reply_my_hedgehog(message: Message, state: FSMContext):
     if not user:
         await message.answer("❌ Вы не зарегистрированы! Нажмите /start")
         return
-    join_date = datetime.strptime(user['join_date'], "%Y-%m-%d %H:%M:%S")
+    join_date = datetime.strptime(user['join_date'], "%Y-%m-%d %H:%M:%S") if user['join_date'] else datetime.now()
     days_in_bot = (datetime.now() - join_date).days
     injured_text = "\n\n🩹 Твоя рука поранена! Купи аптечку в магазине!" if user['is_injured'] else ""
     
@@ -2453,7 +2453,7 @@ async def callback_my_hedgehog(callback: CallbackQuery, state: FSMContext):
     if not user:
         await callback.answer("❌ Нажмите /start сначала!", show_alert=True)
         return
-    join_date = datetime.strptime(user['join_date'], "%Y-%m-%d %H:%M:%S")
+    join_date = datetime.strptime(user['join_date'], "%Y-%m-%d %H:%M:%S") if user['join_date'] else datetime.now()
     days_in_bot = (datetime.now() - join_date).days
     injured_text = "\n\n🩹 Твоя рука поранена! Купи аптечку в магазине!" if user['is_injured'] else ""
     cls_name = CLASSES.get(user['hedgehog_class'], {'name': 'Unknown'})['name']
@@ -2836,6 +2836,9 @@ async def catch_ant(callback: CallbackQuery):
     
     user_id = callback.from_user.id
     user = await get_user(user_id)
+    if not user:
+        await callback.answer("❌ Нажмите /start сначала!", show_alert=True)
+        return
     balance = user['balance']
     ant_chance = user['ant_chance']
     if user['hedgehog_class'] == 'ejidze': ant_chance += 10.0
@@ -3307,6 +3310,9 @@ async def casino_dice(callback: CallbackQuery):
         return
     
     user = await get_user(callback.from_user.id)
+    if not user:
+        await callback.answer("❌ Нажмите /start сначала!", show_alert=True)
+        return
     
     await safe_edit_text(
         callback.message,
@@ -3503,6 +3509,9 @@ async def casino_ejino(callback: CallbackQuery):
         return
     
     user = await get_user(callback.from_user.id)
+    if not user:
+        await callback.answer("❌ Нажмите /start сначала!", show_alert=True)
+        return
     
     await safe_edit_text(
         callback.message,
@@ -3617,6 +3626,9 @@ async def casino_slots(callback: CallbackQuery):
         return
     
     user = await get_user(callback.from_user.id)
+    if not user:
+        await callback.answer("❌ Нажмите /start сначала!", show_alert=True)
+        return
     
     await safe_edit_text(
         callback.message,
@@ -3742,6 +3754,9 @@ async def casino_star(callback: CallbackQuery):
         return
     
     user = await get_user(callback.from_user.id)
+    if not user:
+        await callback.answer("❌ Нажмите /start сначала!", show_alert=True)
+        return
     
     await safe_edit_text(
         callback.message,
@@ -3846,19 +3861,6 @@ async def star_reveal(callback: CallbackQuery, state: FSMContext):
         reply_markup=star_field_keyboard(field, revealed)
     )
 
-@router.callback_query(F.data == "star_end", UserStates.star_game)
-async def star_end_direct(callback: CallbackQuery, state: FSMContext):
-    data = await state.get_data()
-    total_win = data.get('total_win', 0)
-    await state.clear()
-    
-    await safe_edit_text(
-        callback.message,
-        f"🌟 Игра окончена!\n\n"
-        f"💰 Всего выиграно: {total_win} Ежидзиков👍",
-        reply_markup=back_button("casino")
-    )
-
 
 # ☠️ ×10 ОТ СТАВКИ
 @router.callback_query(F.data == "casino_x10")
@@ -3867,6 +3869,9 @@ async def casino_x10(callback: CallbackQuery):
         return
     
     user = await get_user(callback.from_user.id)
+    if not user:
+        await callback.answer("❌ Нажмите /start сначала!", show_alert=True)
+        return
     
     await safe_edit_text(
         callback.message,
@@ -4786,8 +4791,8 @@ async def policy_usage(callback: CallbackQuery):
     if not await check_access(bot, callback.from_user.id, callback):
         return
     
-    await safe_edit_text(
-        callback.message,
+    chat_id = callback.message.chat.id
+    full_text = (
         "📜 Политика использования бота «🦔Говорящий Еж🦔»\n\n"
         "1. Бот создан для развлечения. Виртуальная валюта «Ежидзики» не имеет реальной ценности.\n\n"
         "2. Запрещено:\n"
@@ -4800,9 +4805,13 @@ async def policy_usage(callback: CallbackQuery):
         "   • Заблокировать доступ к боту\n"
         "   • Изменять правила без предупреждения\n\n"
         "4. Используя бота, вы соглашаетесь с этими правилами.\n\n"
-        "🦔 Приятной игры!",
-        reply_markup=back_button("support")
+        "🦔 Приятной игры!"
     )
+    await stream_text(chat_id, full_text, chunk_size=20, delay=0.04)
+    try:
+        await callback.message.answer(full_text, reply_markup=back_button("support"))
+    except Exception:
+        await safe_edit_text(callback.message, full_text, reply_markup=back_button("support"))
 
 
 @router.callback_query(F.data == "policy_privacy")
@@ -4810,8 +4819,8 @@ async def policy_privacy(callback: CallbackQuery):
     if not await check_access(bot, callback.from_user.id, callback):
         return
     
-    await safe_edit_text(
-        callback.message,
+    chat_id = callback.message.chat.id
+    full_text = (
         "🔒 Политика конфиденциальности бота «🦔Говорящий Еж🦔»\n\n"
         "1. Какие данные мы собираем:\n"
         "   • Ваш Telegram ID и username\n"
@@ -4824,9 +4833,13 @@ async def policy_privacy(callback: CallbackQuery):
         "3. Мы НЕ передаём данные третьим лицам.\n\n"
         "4. Данные хранятся на защищённом сервере.\n\n"
         "5. Вы можете запросить удаление данных через техподдержку.\n\n"
-        "🦔 Ваша безопасность важна для нас!",
-        reply_markup=back_button("support")
+        "🦔 Ваша безопасность важна для нас!"
     )
+    await stream_text(chat_id, full_text, chunk_size=20, delay=0.04)
+    try:
+        await callback.message.answer(full_text, reply_markup=back_button("support"))
+    except Exception:
+        await safe_edit_text(callback.message, full_text, reply_markup=back_button("support"))
 
 
 @router.callback_query(F.data == "write_support")
@@ -5494,7 +5507,6 @@ async def act_balance(callback: CallbackQuery, state: FSMContext):
     check_state = await state.get_state()
     check_data = await state.get_data()
     print(f"[DEBUG] act_balance: set state={check_state}, data={check_data}")
-    await callback.answer()
     await callback.message.answer("💰 Введите сумму изменения (+/-):")
 
 @router.callback_query(F.data.startswith("act_ban_"))
@@ -5502,7 +5514,6 @@ async def act_ban(callback: CallbackQuery, state: FSMContext):
     user_id = int(callback.data.replace("act_ban_", ""))
     await state.update_data(target_user_id=user_id)
     await state.set_state(AdminStates.waiting_ban_reason)
-    await callback.answer()
     await callback.message.answer("🚫 Введите причину бана:")
 
 @router.callback_query(F.data.startswith("act_sban_ads_"))
