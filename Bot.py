@@ -840,10 +840,21 @@ def main_reply_keyboard(is_admin: bool = False, is_fake_admin: bool = False):
         [KeyboardButton(text="🏠 Меню", style=ButtonStyle.PRIMARY)],
         [KeyboardButton(text="🦔 Мой Ёж"), KeyboardButton(text="🌟 Финансы")],
         [KeyboardButton(text="🤔 Поддержка"), KeyboardButton(text="🎰 Ежино")],
+        [KeyboardButton(text="🧩 Пазл", style=ButtonStyle.PRIMARY)],
         [KeyboardButton(text="Image Test")]
     ]
     if is_admin or is_fake_admin:
         buttons.append([KeyboardButton(text="🛠 Панель", style=ButtonStyle.DANGER)])
+    return ReplyKeyboardMarkup(keyboard=buttons, resize_keyboard=True)
+
+
+def puzzle_reply_keyboard():
+    buttons = [
+        [KeyboardButton(text="🏠 Меню", style=ButtonStyle.PRIMARY)],
+        [KeyboardButton(text="🛒 Магазин"), KeyboardButton(text="⚒️ Кузница")],
+        [KeyboardButton(text="🤖 ИИ-ЕЖ")],
+        [KeyboardButton(text="Image Test")]
+    ]
     return ReplyKeyboardMarkup(keyboard=buttons, resize_keyboard=True)
 
 def death_reply_keyboard():
@@ -877,12 +888,8 @@ def main_menu_keyboard(is_admin: bool = False):
             InlineKeyboardButton(text="🦔Погладить🦔", callback_data="pet", style=ButtonStyle.SUCCESS)
         ],
         [
-            InlineKeyboardButton(text="🛒Магазин🛒", callback_data="shop"),
-            InlineKeyboardButton(text="⚒️ Кузница", callback_data="stub_forge") # STUB
-        ],
-        [
-             InlineKeyboardButton(text="💎 Алмазы", callback_data="diamond_menu"), # NEW
-             InlineKeyboardButton(text="🤖 ИИ-ЕЖ", callback_data="stub_ai") # STUB
+             InlineKeyboardButton(text="💎 Алмазы", callback_data="diamond_menu"),
+             InlineKeyboardButton(text="🧩 Пазл", callback_data="puzzle")
         ],
         [
             InlineKeyboardButton(text="💸 Перевод", callback_data="transfer_menu"),
@@ -922,6 +929,15 @@ def feed_keyboard():
 def pet_keyboard():
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="Погладить 🦔", callback_data="do_pet")],
+        [InlineKeyboardButton(text="Назад ◀️◀️◀️", callback_data="menu")]
+    ])
+
+
+def puzzle_keyboard():
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🛒 Магазин", callback_data="shop", style=ButtonStyle.SUCCESS)],
+        [InlineKeyboardButton(text="⚒️ Кузница", callback_data="stub_forge")],
+        [InlineKeyboardButton(text="🤖 ИИ-ЕЖ", callback_data="stub_ai")],
         [InlineKeyboardButton(text="Назад ◀️◀️◀️", callback_data="menu")]
     ])
 
@@ -2121,6 +2137,99 @@ async def reply_casino(message: Message, state: FSMContext):
             await message.answer(text, reply_markup=casino_keyboard())
     else:
         await message.answer(text, reply_markup=casino_keyboard())
+
+
+@router.message(F.text == "🧩 Пазл")
+async def reply_puzzle(message: Message, state: FSMContext):
+    await state.clear()
+    if not await check_access(bot, message.from_user.id, message=message):
+        return
+    
+    full_text = (
+        "🧩 Добро пожаловать в пазл! 🧩\n\n"
+        "Здесь вы можете найти всякие интересные вещи, "
+        "устаревшие функции, и функции, которые находятся в бете!\n\n"
+        "Выбери раздел из кнопок ниже 👇"
+    )
+    await message.answer(full_text, reply_markup=puzzle_reply_keyboard())
+    await message.answer("🧩 Разделы пазла:", reply_markup=puzzle_keyboard())
+
+
+@router.callback_query(F.data == "puzzle")
+async def puzzle_callback(callback: CallbackQuery, state: FSMContext):
+    await state.clear()
+    if not await check_access(bot, callback.from_user.id, callback):
+        return
+    
+    full_text = (
+        "🧩 Добро пожаловать в пазл! 🧩\n\n"
+        "Здесь вы можете найти всякие интересные вещи, "
+        "устаревшие функции, и функции, которые находятся в бете!\n\n"
+        "Выбери раздел из кнопок ниже 👇"
+    )
+    chat_id = callback.message.chat.id
+    await stream_text(chat_id, full_text, chunk_size=20, delay=0.04)
+    try:
+        await callback.message.answer(full_text, reply_markup=puzzle_keyboard())
+    except Exception:
+        await safe_edit_text(callback.message, full_text, reply_markup=puzzle_keyboard())
+    # Также обновляем reply-клавиатуру
+    try:
+        await callback.message.answer("⬇️ Пазл-режим активен", reply_markup=puzzle_reply_keyboard())
+    except Exception:
+        pass
+
+
+@router.message(F.text == "🛒 Магазин")
+async def reply_shop(message: Message, state: FSMContext):
+    await state.clear()
+    if not await check_access(bot, message.from_user.id, message=message):
+        return
+    # Переиспользуем логику магазина
+    user = await get_user(message.from_user.id)
+    if not user:
+        await message.answer("❌ Вы не зарегистрированы! Нажмите /start")
+        return
+    
+    async with aiosqlite.connect(DB_NAME) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute("SELECT * FROM shop_items ORDER BY price ASC") as cursor:
+            items = await cursor.fetchall()
+    
+    if not items:
+        await message.answer("🛒 Магазин пуст!", reply_markup=back_button("puzzle"))
+        return
+    
+    text = "🛒 Магазин 🛒\n\n"
+    for item in items:
+        curr = CURRENCY_LABELS.get(item['currency'], item['currency'])
+        text += f"• {item['name']} — {item['price']} {curr}\n"
+    text += "\nНажми на предмет для покупки!"
+    
+    # Собираем inline-клавиатуру магазина
+    shop_buttons = []
+    for item in items:
+        shop_buttons.append([InlineKeyboardButton(text=f"{item['name']} ({item['price']})", callback_data=f"shop_item_{item['id']}")])
+    shop_buttons.append([InlineKeyboardButton(text="🎒 Инвентарь", callback_data="inventory")])
+    shop_buttons.append([InlineKeyboardButton(text="Назад ◀️◀️◀️", callback_data="puzzle")])
+    
+    await message.answer(text, reply_markup=InlineKeyboardMarkup(inline_keyboard=shop_buttons))
+
+
+@router.message(F.text == "⚒️ Кузница")
+async def reply_forge(message: Message, state: FSMContext):
+    await state.clear()
+    if not await check_access(bot, message.from_user.id, message=message):
+        return
+    await message.answer("⚒️ Кузница пока в разработке! Следите за обновлениями 🧩")
+
+
+@router.message(F.text == "🤖 ИИ-ЕЖ")
+async def reply_ai_hedgehog(message: Message, state: FSMContext):
+    await state.clear()
+    if not await check_access(bot, message.from_user.id, message=message):
+        return
+    await message.answer("🤖 ИИ-ЕЖ пока в бета-тестировании! Скоро будет доступен 🧩")
 
 
 @router.message(F.text == "🛠 Панель")
