@@ -850,8 +850,9 @@ def death_reply_keyboard():
     buttons = [
         [KeyboardButton(text="🔘 Получить 1 ежидзик за клик 😢")],
         [KeyboardButton(text="🙏 Попросить Денег")],
-        [KeyboardButton(text="💰 Баланс")], 
-        [KeyboardButton(text="🆕 Купить Ежа")]
+        [KeyboardButton(text="💰 Баланс")],
+        [KeyboardButton(text="🆕 Купить Ежа")],
+        [KeyboardButton(text="🧪 Dev Test")]
     ]
     return ReplyKeyboardMarkup(keyboard=buttons, resize_keyboard=True)
 
@@ -1903,6 +1904,44 @@ async def process_buy_class(callback: CallbackQuery):
 async def death_menu_back(callback: CallbackQuery):
     await safe_delete(callback.message)
     await callback.message.answer("🪦 Вы в посмертии...", reply_markup=death_reply_keyboard())
+
+@router.message(F.text == "🧪 Dev Test")
+async def death_dev_test(message: Message):
+    """Dev Test: бесплатно покупает обычного ежа с 100% сытостью, даже если нет средств"""
+    user_id = message.from_user.id
+    user = await get_user(user_id)
+    if not user:
+        await message.answer("❌ Вы не зарегистрированы! Нажмите /start")
+        return
+    if user['status'] == 'alive':
+        await message.answer("❌ У вас уже есть ёжик!")
+        return
+
+    # Бесплатно даём обычного ежа с 100% сытости
+    async with aiosqlite.connect(DB_NAME) as db:
+        await db.execute('''
+            UPDATE users SET
+                hedgehog_name = '🦔Ежъ🦔',
+                hedgehog_color = 'Не выбран',
+                hedgehog_class = 'normal',
+                happiness = 0,
+                satiety = 100,
+                status = 'alive',
+                alert_sent = 0
+            WHERE user_id = ?
+        ''', (user_id,))
+        await db.commit()
+
+    is_user_admin = await is_admin(user_id)
+    is_fake = await is_fake_admin(user_id)
+    await message.answer(
+        "🧪 Dev Test активирован!\n\n"
+        "🦔 Вы получили обычного ежа — бесплатно!\n"
+        "🍖 Сытость: 100%\n\n"
+        "Теперь вы снова в игре!",
+        reply_markup=main_reply_keyboard(is_user_admin, is_fake)
+    )
+    await message.answer("Меню:", reply_markup=main_menu_keyboard(is_user_admin))
 
 # =====================================
 # 📱 REPLY КНОПКИ (внизу экрана)
