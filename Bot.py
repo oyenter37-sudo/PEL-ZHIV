@@ -4502,7 +4502,7 @@ async def ai_chat_message(message: Message, state: FSMContext):
                         messages=api_messages,
                         tools=AI_TOOLS,
                         temperature=1,
-                        max_completion_tokens=5071,
+                        max_completion_tokens=2048,
                         top_p=1,
                         reasoning_effort="low",
                         stream=False
@@ -4579,8 +4579,16 @@ async def ai_chat_message(message: Message, state: FSMContext):
         if not final_response:
             final_response = "Фыр-фыр... *шуршит иголками* 🦔"
         
-        # Убираем <think...</think» блоки (Qwen3 reasoning)
-        final_response = re.sub(r'<think[\s\S]*?</think\s*>', '', final_response).strip()
+        # Извлекаем <think...</think» блоки и показываем как цитату
+        think_match = re.search(r'<think([\s\S]*?)</think\s*>', final_response)
+        if think_match:
+            think_text = think_match.group(1).strip()
+            final_response = re.sub(r'<think[\s\S]*?</think\s*>', '', final_response).strip()
+            if think_text:
+                # Обрезаем слишком длинный thinking и формируем цитату
+                display_text = think_text[:500] + ("..." if len(think_text) > 500 else "")
+                quote_lines = "\n".join(f"> {line}" for line in display_text.split("\n"))
+                final_response = f"> 💭 Еж думал:\n{quote_lines}\n\n{final_response}"
         if not final_response:
             final_response = "Фыр-фыр... 🦔"
         
