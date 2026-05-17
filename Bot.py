@@ -218,6 +218,11 @@ async def init_db():
                 PRIMARY KEY (user_id, code)
             )
         ''')
+        # Миграция: добавляем used_at если отсутствует
+        try:
+            await db.execute('ALTER TABLE used_promocodes ADD COLUMN used_at TEXT DEFAULT NULL')
+        except Exception:
+            pass  # колонка уже существует
         
         await db.execute('''
             CREATE TABLE IF NOT EXISTS ads (
@@ -7339,13 +7344,15 @@ async def support_inline_info(callback: CallbackQuery):
     if not await check_access(bot, callback.from_user.id, callback):
         return
     
+    bot_me = await bot.get_me()
     text = (
         "ℹ️ **Информация об Inline режиме**\n\n"
         "Вы можете делиться промокодами через inline-режим бота!\n\n"
-        "1. Введите в любом чате: `@bot pr CODE`\n"
-        "(где CODE - код промокода)\n"
+        f"1. Введите в любом чате: `@{bot_me.username} pr CODE`\n"
+        "(где CODE — код промокода)\n"
         "2. Появится кнопка **👍 Нажми СЮДА!**\n"
-        "3. Отправьте сообщение, и любой пользователь сможет активировать промокод, нажав **🔥 Забрать**."
+        "3. Отправьте сообщение, и любой пользователь сможет активировать промокод, нажав **🔥 Забрать**.\n\n"
+        "💡 Также можно просто ввести `@{bot_me.username}` — появится подсказка."
     )
     await safe_edit_text(callback.message, text, reply_markup=back_button("support"))
 
@@ -9810,10 +9817,16 @@ async def check_promocode_and_commands(message: Message, state: FSMContext):
                     pass
                 return
 
-    # Promocodes
-    await process_promocode(message, user_id, text.upper())
+    # Promocodes (тихая проверка — не спамим если текст не промокод)
+    await process_promocode(message, user_id, text.upper(), silent_not_found=True)
 
-async def process_promocode(message: Message, user_id: int, code: str):
+async def process_promocode(message: Message, user_id: int, code: str, silent_not_found: bool = False):
+    """Обрабатывает активацию промокода. Атомарная операция.
+    
+    Args:
+        silent_not_found: если True, не выводить ошибку если промокод не найден
+                          (для автоматической проверки текста в чате)
+    """
     async with aiosqlite.connect(DB_NAME) as db:
         db.row_factory = aiosqlite.Row
         async with db.execute("SELECT * FROM used_promocodes WHERE user_id = ? AND code = ?", (user_id, code)) as cursor:
@@ -9823,14 +9836,16 @@ async def process_promocode(message: Message, user_id: int, code: str):
         async with db.execute("SELECT * FROM promocodes WHERE code = ? AND uses_left > 0", (code,)) as cursor:
             promo = await cursor.fetchone()
         if not promo:
-            # Не отвечаем, если это просто текст
+            if not silent_not_found:
+                await message.answer("❌ Промокод не найден или все активации исчерпаны.")
             return
         
         reward_type = promo['reward_type']
         reward_value = promo['reward_value']
         
+        # Все обновления в одной транзакции
         if reward_type == "balance":
-            await update_balance(user_id, int(reward_value))
+            await db.execute("UPDATE users SET balance = balance + ? WHERE user_id = ?", (int(reward_value), user_id))
             reward_text = f"+{reward_value} Ежидзиков👍"
         elif reward_type == "ants":
             await db.execute("UPDATE users SET ants = ants + ? WHERE user_id = ?", (int(reward_value), user_id))
@@ -9855,54 +9870,71 @@ async def process_promocode(message: Message, user_id: int, code: str):
 @router.inline_query()
 async def inline_query_handler(query: InlineQuery):
     text = query.query.strip()
+    results = []
     
     # Режим "pr CODE"
-    if text.startswith("pr "):
+    if text.lower().startswith("pr "):
         code = text[3:].strip().upper()
-        if not code:
-            return
+        if code:
+            async with aiosqlite.connect(DB_NAME) as db:
+                db.row_factory = aiosqlite.Row
+                async with db.execute("SELECT * FROM promocodes WHERE code = ? AND uses_left > 0", (code,)) as cursor:
+                    promo = await cursor.fetchone()
             
-        async with aiosqlite.connect(DB_NAME) as db:
-            db.row_factory = aiosqlite.Row
-            async with db.execute("SELECT * FROM promocodes WHERE code = ? AND uses_left > 0", (code,)) as cursor:
-                promo = await cursor.fetchone()
-        
-        if promo:
-            type_names = {"balance": "ежидзиков👍", "ants": "муравьев🐜", "color": "цветов🎨"}
-            curr_name = type_names.get(promo['reward_type'], promo['reward_type'])
-            
-            # Deep linking parameter for start
-            deep_link = f"promo_{code}"
-            bot_username = (await bot.get_me()).username
-            url = f"https://t.me/{bot_username}?start={deep_link}"
-            
-            description_text = (
-                f"🦔 Промокод в боте Говорящий Еж! 🦔\n"
-                f"⚡ Активаций осталось на момент сообщения: {promo['uses_left']}\n"
-                f"🌟 Дает: {promo['reward_value']} {curr_name}"
-            )
-            
-            result = InlineQueryResultArticle(
-                id=f"promo_{code}",
-                title="👍 Нажми СЮДА!",
-                description=f"Промокод: {code}",
-                input_message_content=InputTextMessageContent(message_text=description_text),
-                reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                    [InlineKeyboardButton(text="🔥 Забрать", url=url)]
-                ])
-            )
-            
-            await query.answer([result], cache_time=1)
+            if promo:
+                type_names = {"balance": "ежидзиков👍", "ants": "муравьёв🐜", "color": "цвет🎨"}
+                curr_name = type_names.get(promo['reward_type'], promo['reward_type'])
+                
+                # Deep linking parameter for start
+                deep_link = f"promo_{code}"
+                bot_username = (await bot.get_me()).username
+                url = f"https://t.me/{bot_username}?start={deep_link}"
+                
+                description_text = (
+                    f"🦔 Промокод в боте Говорящий Еж! 🦔\n"
+                    f"⚡ Активаций осталось: {promo['uses_left']}\n"
+                    f"🌟 Даёт: {promo['reward_value']} {curr_name}"
+                )
+                
+                results.append(InlineQueryResultArticle(
+                    id=f"promo_{code}",
+                    title="👍 Нажми СЮДА!",
+                    description=f"Промокод: {code} — {promo['reward_value']} {curr_name}",
+                    input_message_content=InputTextMessageContent(message_text=description_text),
+                    reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                        [InlineKeyboardButton(text="🔥 Забрать", url=url)]
+                    ])
+                ))
+            else:
+                # Промокод не найден — показываем сообщение
+                results.append(InlineQueryResultArticle(
+                    id="not_found",
+                    title="❌ Промокод не найден",
+                    description=f"Код \"{code}\" не существует или исчерпан",
+                    input_message_content=InputTextMessageContent(
+                        message_text=f"❌ Промокод \"{code}\" не найден или все активации исчерпаны."
+                    )
+                ))
     
-    # Если пустой запрос или только имя бота
-    elif text == "":
-        result = InlineQueryResultArticle(
+    # Если пустой запрос
+    if not text or not text.lower().startswith("pr "):
+        bot_username = (await bot.get_me()).username
+        results.append(InlineQueryResultArticle(
             id="info",
-            title="Прочитайте подробнее в инфо",
-            description="Напишите 'pr КОД' для отправки промокода",
-            input_message_content=InputTextMessageContent(message_text="Используйте inline режим для отправки промокодов!"),
-        )
-        await query.answer([result], cache_time=300)
+            title="🎟 Поделиться промокодом",
+            description=f"Напишите @{bot_username} pr КОД для отправки промокода",
+            input_message_content=InputTextMessageContent(
+                message_text=(
+                    f"🦔 Промокоды бота Говорящий Еж!\n\n"
+                    f"Чтобы поделиться промокодом:\n"
+                    f"1. Введите: @{bot_username} pr КОД\n"
+                    f"2. Нажмите на результат\n"
+                    f"3. Любой пользователь сможет забрать промокод!"
+                )
+            )
+        ))
+    
+    await query.answer(results, cache_time=5)
 
 # =====================================
 # 🎰 ДОМАШНЕЕ КАЗИНО
