@@ -56,9 +56,13 @@ AI_HEDGEHOG_SYSTEM = """Ты — Говорящий Еж 🦔, милый кол
 
 ХАРАКТЕР: милый, колючий, добрый, любишь яблоки и жуков, ленивый, фыркаешь, помогаешь игрокам. Говоришь коротко с эмодзи 🦔🍎🐜💎
 
-У тебя есть ИНСТРУМЕНТЫ — вызывай их когда нужно узнать информацию! Не выдумывай данные, всегда используй инструменты.
+У тебя есть ИНСТРУМЕНТЫ — два вида:
+1) ИНФОРМАЦИОННЫЕ: узнать баланс, инвентарь, про ежа, банк, майнинг, муравьёв, разделы
+2) ДЕЙСТВИЯ: обменять валюту, перевести деньги, забрать бонус, поймать муравья, сыграть в Ежино
 
-ПРАВИЛА: 1) Отвечай как ёж — мило, с фырканьем 2) Про бота — используй инструменты и объясняй точно 3) Не про бота — можешь ответить в образе 4) Не придумывай функции! Не знаешь — «фыр-фыр, не знаю» 5) Ты настоящий ёж, не ИИ! 6) По-русски 7) Коротко, но на сложные — подробнее"""
+Когда игрок просит ЧТО-ТО СДЕЛАТЬ — вызывай инструмент-действие! Не выдумывай результат, всегда используй инструменты.
+
+ПРАВИЛА: 1) Отвечай как ёж — мило, с фырканьем 2) Про бота — используй инструменты 3) Не про бота — можешь ответить в образе 4) Не придумывай функции! 5) Ты настоящий ёж, не ИИ! 6) По-русски 7) Коротко, но на сложные — подробнее 8) При азартных играх предупреждаешь о риске"""
 
 # Определение инструментов для Groq function calling
 AI_TOOLS = [
@@ -132,6 +136,129 @@ AI_TOOLS = [
                     }
                 },
                 "required": ["section"]
+            }
+        }
+    },
+    # ====== ИНСТРУМЕНТЫ-ДЕЙСТВИЯ ======
+    {
+        "type": "function",
+        "function": {
+            "name": "action_exchange_to_skin",
+            "description": "Обменять Ежидзики на Кожу слона. Курс: 45 Ежидзиков = 1 Кожа слона. Можно обменять несколько раз за один вызов.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "times": {
+                        "type": "integer",
+                        "description": "Сколько раз обменять (1 раз = 45 ЕЖ → 1 Кожа). По умолчанию 1."
+                    }
+                },
+                "required": []
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "action_exchange_to_balance",
+            "description": "Обменять Кожу слона на Ежидзики. Курс: 1 Кожа слона = 45 Ежидзиков. Можно обменять несколько раз за один вызов.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "times": {
+                        "type": "integer",
+                        "description": "Сколько раз обменять (1 раз = 1 Кожа → 45 ЕЖ). По умолчанию 1."
+                    }
+                },
+                "required": []
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "action_exchange_skin_to_diamonds",
+            "description": "Обменять Кожу слона на Алмазы. Курс: 3 Кожи слона = 1 Алмаз. Можно обменять несколько раз.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "times": {
+                        "type": "integer",
+                        "description": "Сколько раз обменять (1 раз = 3 Кожи → 1 Алмаз). По умолчанию 1."
+                    }
+                },
+                "required": []
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "action_exchange_diamonds_to_skin",
+            "description": "Обменять Алмазы на Кожу слона. Курс: 1 Алмаз = 3 Кожи слона. Можно обменять несколько раз.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "times": {
+                        "type": "integer",
+                        "description": "Сколько раз обменять (1 раз = 1 Алмаз → 3 Кожи). По умолчанию 1."
+                    }
+                },
+                "required": []
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "action_transfer",
+            "description": "Перевести Ежидзики другому игроку. Комиссия 5%, минимум 10 Ежидзиков. Получатель: Telegram ID (число), @username, или #номер_игрока.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "recipient": {
+                        "type": "string",
+                        "description": "Получатель: Telegram ID (число), @username, или #номер_игрока"
+                    },
+                    "amount": {
+                        "type": "integer",
+                        "description": "Сумма перевода в Ежидзиках (минимум 10)"
+                    }
+                },
+                "required": ["recipient", "amount"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "action_claim_daily_bonus",
+            "description": "Забрать ежедневный бонус (25 Ежидзиков). Доступен раз в 24 часа.",
+            "parameters": {"type": "object", "properties": {}, "required": []}
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "action_catch_ant",
+            "description": "Попытаться поймать муравья. Стоит 200 Ежидзиков, шанс ловли ~10%+бонусы. Каждый муравей = 10 ЕЖ/час пассивного дохода.",
+            "parameters": {"type": "object", "properties": {}, "required": []}
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "action_play_ejino",
+            "description": "Сыграть в Ежино — рулетку с множителями. Шансы: x0(18%), x0.5(18%), x1(18%), x1.5(18%), x2(20%), x5(8%). Ставка от 10 Ежидзиков.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "bet": {
+                        "type": "integer",
+                        "description": "Ставка в Ежидзиках (минимум 10)"
+                    }
+                },
+                "required": ["bet"]
             }
         }
     }
@@ -252,8 +379,262 @@ async def ai_tool_get_section_details(user_id: int, section: str) -> str:
     return SECTION_DETAILS.get(section.lower(), f"Раздел '{section}' не найден. Доступные: " + ", ".join(SECTION_DETAILS.keys()))
 
 
+# ====== ФУНКЦИИ ИНСТРУМЕНТОВ-ДЕЙСТВИЙ ======
+
+async def ai_tool_action_exchange_to_skin(user_id: int, times: int = 1) -> str:
+    """Обменять Ежидзики на Кожу слона: 45 ЕЖ → 1 Кожа. Можно несколько раз."""
+    times = max(1, min(times, 100))  # Лимит 100 за раз
+    cost = 45 * times
+    async with aiosqlite.connect(DB_NAME) as db:
+        cursor = await db.execute(
+            "UPDATE users SET balance = balance - ?, elephant_skin = elephant_skin + ? WHERE user_id = ? AND balance >= ?",
+            (cost, times, user_id, cost)
+        )
+        if cursor.rowcount == 0:
+            user = await get_user(user_id)
+            bal = user['balance'] if user else 0
+            return f"❌ Недостаточно Ежидзиков! Нужно {cost}, у тебя {bal}"
+        await db.commit()
+    user = await get_user(user_id)
+    return f"✅ Обмен выполнен! -{cost} Ежидзиков👍, +{times} Кожи слона🐘. Осталось: {user['balance']} ЕЖ, {user['elephant_skin']} КС"
+
+
+async def ai_tool_action_exchange_to_balance(user_id: int, times: int = 1) -> str:
+    """Обменять Кожу слона на Ежидзики: 1 Кожа → 45 ЕЖ. Можно несколько раз."""
+    times = max(1, min(times, 100))
+    reward = 45 * times
+    async with aiosqlite.connect(DB_NAME) as db:
+        cursor = await db.execute(
+            "UPDATE users SET elephant_skin = elephant_skin - ?, balance = balance + ? WHERE user_id = ? AND elephant_skin >= ?",
+            (times, reward, user_id, times)
+        )
+        if cursor.rowcount == 0:
+            user = await get_user(user_id)
+            skin = user['elephant_skin'] if user else 0
+            return f"❌ Недостаточно Кожи слона! Нужно {times}, у тебя {skin}"
+        await db.commit()
+    user = await get_user(user_id)
+    return f"✅ Обмен выполнен! -{times} Кожи слона🐘, +{reward} Ежидзиков👍. Осталось: {user['balance']} ЕЖ, {user['elephant_skin']} КС"
+
+
+async def ai_tool_action_exchange_skin_to_diamonds(user_id: int, times: int = 1) -> str:
+    """Обменять Кожу слона на Алмазы: 3 Кожи → 1 Алмаз. Можно несколько раз."""
+    times = max(1, min(times, 100))
+    skin_cost = 3 * times
+    async with aiosqlite.connect(DB_NAME) as db:
+        cursor = await db.execute(
+            "UPDATE users SET elephant_skin = elephant_skin - ?, diamonds = diamonds + ? WHERE user_id = ? AND elephant_skin >= ?",
+            (skin_cost, times, user_id, skin_cost)
+        )
+        if cursor.rowcount == 0:
+            user = await get_user(user_id)
+            skin = user['elephant_skin'] if user else 0
+            return f"❌ Недостаточно Кожи слона! Нужно {skin_cost} (3 за алмаз × {times}), у тебя {skin}"
+        await db.commit()
+    user = await get_user(user_id)
+    return f"✅ Обмен выполнен! -{skin_cost} Кожи слона🐘, +{times} Алмазов💎. Осталось: {user['elephant_skin']} КС, {user['diamonds']} 💎"
+
+
+async def ai_tool_action_exchange_diamonds_to_skin(user_id: int, times: int = 1) -> str:
+    """Обменять Алмазы на Кожу слона: 1 Алмаз → 3 Кожи. Можно несколько раз."""
+    times = max(1, min(times, 100))
+    skin_reward = 3 * times
+    async with aiosqlite.connect(DB_NAME) as db:
+        cursor = await db.execute(
+            "UPDATE users SET diamonds = diamonds - ?, elephant_skin = elephant_skin + ? WHERE user_id = ? AND diamonds >= ?",
+            (times, skin_reward, user_id, times)
+        )
+        if cursor.rowcount == 0:
+            user = await get_user(user_id)
+            dia = user['diamonds'] if user else 0
+            return f"❌ Недостаточно Алмазов! Нужно {times}, у тебя {dia}"
+        await db.commit()
+    user = await get_user(user_id)
+    return f"✅ Обмен выполнен! -{times} Алмазов💎, +{skin_reward} Кожи слона🐘. Осталось: {user['diamonds']} 💎, {user['elephant_skin']} КС"
+
+
+async def ai_tool_action_transfer(user_id: int, recipient: str, amount: int) -> str:
+    """Перевести Ежидзики другому игроку. Комиссия 5%, минимум 10."""
+    if amount < 10:
+        return "❌ Минимальная сумма перевода — 10 Ежидзиков!"
+    
+    # Ищем получателя
+    target = await find_user_flexible(recipient)
+    if not target:
+        return f"❌ Игрок '{recipient}' не найден! Укажи ID, @username или #номер"
+    
+    if target['user_id'] == user_id:
+        return "❌ Нельзя переводить самому себе!"
+    
+    commission = max(1, int(amount * 0.05))
+    to_receive = amount - commission
+    
+    async with aiosqlite.connect(DB_NAME) as db:
+        cursor = await db.execute(
+            "UPDATE users SET balance = balance - ? WHERE user_id = ? AND balance >= ?",
+            (amount, user_id, amount)
+        )
+        if cursor.rowcount == 0:
+            user = await get_user(user_id)
+            return f"❌ Недостаточно средств! Нужно {amount}, у тебя {user['balance'] if user else 0}"
+        
+        await db.execute("UPDATE users SET balance = balance + ? WHERE user_id = ?", (to_receive, target['user_id']))
+        await db.commit()
+    
+    return (f"✅ Перевод выполнен!\n"
+            f"📤 Получатель: @{target['username']} (#{target['player_number']:04d})\n"
+            f"💰 Списано: {amount} ЕЖ\n"
+            f"📉 Комиссия: {commission} ЕЖ (5%)\n"
+            f"📥 Зачислено: {to_receive} ЕЖ")
+
+
+async def ai_tool_action_claim_daily_bonus(user_id: int) -> str:
+    """Забрать ежедневный бонус (25 ЕЖ, раз в 24ч)."""
+    user = await get_user(user_id)
+    if not user:
+        return "Игрок не найден"
+    
+    now = datetime.now()
+    last_daily = user['last_daily']
+    
+    if last_daily:
+        try:
+            last_daily_dt = datetime.strptime(last_daily, "%Y-%m-%d %H:%M:%S")
+            if now - last_daily_dt < timedelta(hours=24):
+                remaining = timedelta(hours=24) - (now - last_daily_dt)
+                hours = remaining.seconds // 3600
+                minutes = (remaining.seconds % 3600) // 60
+                return f"⏰ Бонус уже забран! Следующий через {hours}ч {minutes}мин"
+        except:
+            pass
+    
+    bonus_amount = int(await get_setting("daily_bonus", "25"))
+    await update_balance(user_id, bonus_amount)
+    
+    async with aiosqlite.connect(DB_NAME) as db:
+        await db.execute(
+            "UPDATE users SET last_daily = ? WHERE user_id = ?",
+            (now.strftime("%Y-%m-%d %H:%M:%S"), user_id)
+        )
+        await db.commit()
+    
+    user = await get_user(user_id)
+    return f"✅ Ежедневный бонус получен! +{bonus_amount} Ежидзиков👍. Баланс: {user['balance']} ЕЖ"
+
+
+async def ai_tool_action_catch_ant(user_id: int) -> str:
+    """Попытаться поймать муравья (200 ЕЖ, шанс ~10%+)."""
+    user = await get_user(user_id)
+    if not user:
+        return "Игрок не найден"
+    
+    ant_cost = int(await get_setting("ant_catch_cost", "200"))
+    ant_income = int(await get_setting("ant_income", "10"))
+    
+    if user['balance'] < ant_cost:
+        return f"❌ Недостаточно Ежидзиков! Нужно {ant_cost}, у тебя {user['balance']}"
+    
+    # Списываем стоимость
+    async with aiosqlite.connect(DB_NAME) as db:
+        await db.execute("UPDATE users SET balance = balance - ? WHERE user_id = ?", (ant_cost, user_id))
+        await db.commit()
+    
+    # Считаем шанс
+    ant_chance = user['ant_chance']
+    if user['hedgehog_class'] == 'ejidze':
+        ant_chance += 10.0
+    
+    if random.random() * 100 < ant_chance:
+        async with aiosqlite.connect(DB_NAME) as db:
+            await db.execute("UPDATE users SET ants = ants + 1 WHERE user_id = ?", (user_id,))
+            await db.commit()
+        user = await get_user(user_id)
+        total_income = user['ants'] * ant_income
+        return (f"🎉 УРА! Муравей пойман! 🐜\n"
+                f"Теперь муравьёв: {user['ants']}\n"
+                f"Доход: {total_income} ЕЖ/час\n"
+                f"💰 Баланс: {user['balance']} ЕЖ")
+    else:
+        user = await get_user(user_id)
+        return (f"😔 Муравей убежал... Фыр-фыр!\n"
+                f"Шанс ловли: {ant_chance:.1f}%\n"
+                f"Попробуй ещё раз!\n"
+                f"💰 Баланс: {user['balance']} ЕЖ")
+
+
+async def ai_tool_action_play_ejino(user_id: int, bet: int) -> str:
+    """Сыграть в Ежино — рулетка с множителями (x0-x5)."""
+    if bet < 10:
+        return "❌ Минимальная ставка — 10 Ежидзиков!"
+    if bet > 10000:
+        return "❌ Максимальная ставка — 10000 Ежидзиков!"
+    
+    user = await get_user(user_id)
+    if not user:
+        return "Игрок не найден"
+    
+    if user['balance'] < bet:
+        return f"❌ Недостаточно Ежидзиков! Ставка {bet}, у тебя {user['balance']}"
+    
+    # Крутим рулетку (те же множители что в основной игре)
+    roll = random.randint(1, 100)
+    cumulative = 0
+    multiplier = 0
+    for mult, chance in EJINO_MULTIPLIERS:
+        cumulative += chance
+        if roll <= cumulative:
+            multiplier = mult
+            break
+    
+    win = int(bet * multiplier)
+    profit = win - bet
+    
+    async with aiosqlite.connect(DB_NAME) as db:
+        cursor = await db.execute(
+            "UPDATE users SET balance = balance - ? WHERE user_id = ? AND balance >= ?",
+            (bet, user_id, bet)
+        )
+        if cursor.rowcount == 0:
+            return f"❌ Недостаточно Ежидзиков! Ставка {bet}, у тебя недостаточно средств"
+        
+        if win > 0:
+            await db.execute("UPDATE users SET balance = balance + ? WHERE user_id = ?", (win, user_id))
+        
+        if profit > 0:
+            await db.execute(
+                "UPDATE users SET casino_wins = casino_wins + 1, total_casino_profit = total_casino_profit + ? WHERE user_id = ?",
+                (profit, user_id)
+            )
+        elif profit < 0:
+            await db.execute(
+                "UPDATE users SET casino_losses = casino_losses + 1, total_casino_profit = total_casino_profit + ? WHERE user_id = ?",
+                (profit, user_id)
+            )
+        await db.commit()
+    
+    user = await get_user(user_id)
+    
+    if multiplier >= 5:
+        result_emoji = "🔥🎉🔥 ДЖЕКПОТ!!!"
+    elif multiplier >= 2:
+        result_emoji = "🎉 Победа!"
+    elif multiplier >= 1:
+        result_emoji = "😐 Возврат"
+    elif multiplier >= 0.5:
+        result_emoji = "😔 Частичный возврат"
+    else:
+        result_emoji = "💔 Проигрыш..."
+    
+    return (f"🦔 ЕЖИНО — результат!\n"
+            f"Ставка: {bet} ЕЖ | Множитель: ×{multiplier}\n"
+            f"{result_emoji}\n"
+            f"Выигрыш: {win} ЕЖ | Профит: {'+' if profit >= 0 else ''}{profit} ЕЖ\n"
+            f"💰 Баланс: {user['balance']} ЕЖ")
+
+
 # Маппинг имен инструментов на функции
 AI_TOOL_FUNCTIONS = {
+    # Информационные
     "get_balance": ai_tool_get_balance,
     "get_hedgehog_info": ai_tool_get_hedgehog_info,
     "get_ants_info": ai_tool_get_ants_info,
@@ -262,6 +643,19 @@ AI_TOOL_FUNCTIONS = {
     "get_mining_info": ai_tool_get_mining_info,
     "get_referral_info": ai_tool_get_referral_info,
     "get_section_details": ai_tool_get_section_details,
+    # Действия — обмен
+    "action_exchange_to_skin": ai_tool_action_exchange_to_skin,
+    "action_exchange_to_balance": ai_tool_action_exchange_to_balance,
+    "action_exchange_skin_to_diamonds": ai_tool_action_exchange_skin_to_diamonds,
+    "action_exchange_diamonds_to_skin": ai_tool_action_exchange_diamonds_to_skin,
+    # Действия — перевод
+    "action_transfer": ai_tool_action_transfer,
+    # Действия — бонусы
+    "action_claim_daily_bonus": ai_tool_action_claim_daily_bonus,
+    # Действия — муравьи
+    "action_catch_ant": ai_tool_action_catch_ant,
+    # Действия — казино
+    "action_play_ejino": ai_tool_action_play_ejino,
 }
 
 # =====================================
