@@ -8,8 +8,6 @@ import os
 import json
 import secrets
 import asyncio
-import subprocess
-import re
 from datetime import datetime, timedelta
 
 import aiosqlite
@@ -17,8 +15,8 @@ from aiohttp import web
 
 DB_NAME = os.environ.get("DB_NAME", "hedgehog_bot.db")
 
-# Глобальная переменная с публичным URL
-PUBLIC_URL = None
+# Публичный URL — хост пробрасывает порт 8080 сюда
+PUBLIC_URL = "https://peelllll.apps.apply.build"
 
 # =====================================
 # 🎨 HTML / CSS ШАБЛОНЫ
@@ -700,51 +698,4 @@ async def start_web_server():
     await runner.setup()
     site = web.TCPSite(runner, '0.0.0.0', 8080)
     await site.start()
-    print("🌐 Web-сервер запущен на порту 8080")
-
-    # Запускаем cloudflared туннель в фоне (не блокирует!)
-    asyncio.create_task(_start_cloudflare_tunnel())
-
-
-async def _start_cloudflare_tunnel():
-    """Запускает cloudflared quick tunnel для публичного доступа (неблокирующий)."""
-    global PUBLIC_URL
-    # Ищем cloudflared в нескольких местах
-    cloudflared_path = None
-    for p in ["/usr/local/bin/cloudflared", os.path.expanduser("~/.local/bin/cloudflared"), "cloudflared"]:
-        if os.path.exists(p) or (p == "cloudflared" and os.system("which cloudflared > /dev/null 2>&1") == 0):
-            cloudflared_path = p
-            break
-    if not cloudflared_path:
-        print("⚠️ cloudflared не найден, туннель не запущен")
-        return
-
-    try:
-        proc = await asyncio.create_subprocess_exec(
-            cloudflared_path, "tunnel", "--url", "http://localhost:8080",
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        # Читаем stderr чтобы вытащить URL (ждём до 45 секунд)
-        url_found = None
-        try:
-            for _ in range(45):  # до 45 строк
-                line = await asyncio.wait_for(proc.stderr.readline(), timeout=5)
-                line = line.decode("utf-8", errors="ignore")
-                # Ищем URL в формате trycloudflare.com
-                match = re.search(r'https://[a-z0-9\-]+\.trycloudflare\.com', line)
-                if match:
-                    url_found = match.group(0)
-                    break
-                if not line:
-                    break  # stderr закрыт
-        except asyncio.TimeoutError:
-            pass  # таймаут — не критично
-
-        if url_found:
-            PUBLIC_URL = url_found
-            print(f"🌐 Публичный URL: {PUBLIC_URL}")
-        else:
-            print("⚠️ Не удалось получить URL туннеля за 45 сек")
-    except Exception as e:
-        print(f"⚠️ Ошибка запуска cloudflared: {e}")
+    print(f"🌐 Web-сервер запущен на порту 8080 → {PUBLIC_URL}")

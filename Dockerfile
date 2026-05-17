@@ -10,12 +10,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libffi-dev \
     fonts-dejavu \
     fonts-liberation \
-    curl \
     && rm -rf /var/lib/apt/lists/*
-
-# Установка cloudflared для публичного туннеля
-RUN curl -fsSL https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64 -o /usr/local/bin/cloudflared \
-    && chmod +x /usr/local/bin/cloudflared
 
 # Копируем зависимости и ставим их
 COPY requirements.txt .
