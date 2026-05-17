@@ -1089,6 +1089,7 @@ def auction_currency_keyboard(action_data: str):
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="💰 Ежидзики", callback_data=f"{action_data}_balance"),
          InlineKeyboardButton(text="💎 Алмазы", callback_data=f"{action_data}_diamonds")],
+        [InlineKeyboardButton(text="🐘 Кожа слона", callback_data=f"{action_data}_skin")],
         [InlineKeyboardButton(text="❌ Отмена", callback_data="forge_auction")]
     ])
 
@@ -2040,12 +2041,12 @@ async def death_beg(message: Message):
     if last_beg:
         last_dt = datetime.strptime(last_beg, "%Y-%m-%d %H:%M:%S")
         diff = now - last_dt
-        if diff.total_seconds() < 300: # 5 minutes
-            remain = 300 - int(diff.total_seconds())
+        if diff.total_seconds() < 1800: # 30 minutes
+            remain = 1800 - int(diff.total_seconds())
             await message.answer(f"⏳ Подожди еще {remain} секунд...")
             return
 
-    amount = random.randint(20, 69)
+    amount = random.randint(5, 25)
     await update_balance(user_id, amount)
     async with aiosqlite.connect(DB_NAME) as db:
         await db.execute("UPDATE users SET last_beg = ? WHERE user_id = ?", (now.strftime("%Y-%m-%d %H:%M:%S"), user_id))
@@ -3452,7 +3453,7 @@ async def process_transfer_amount(message: Message, state: FSMContext):
     data = await state.get_data()
     recipient_id = data['recipient_id']
     
-    commission = int(amount * 0.05)
+    commission = max(1, int(amount * 0.05))
     to_receive = amount - commission
     
     async with aiosqlite.connect(DB_NAME) as db:
@@ -3669,6 +3670,7 @@ async def do_craft(callback: CallbackQuery):
     craft_id = int(callback.data.replace("do_craft_", ""))
     user_id = callback.from_user.id
 
+    # Вся операция в одной транзакции для защиты от race condition
     async with aiosqlite.connect(DB_NAME) as db:
         db.row_factory = aiosqlite.Row
         async with db.execute("SELECT * FROM crafts WHERE id = ?", (craft_id,)) as cursor:
@@ -3683,26 +3685,47 @@ async def do_craft(callback: CallbackQuery):
         ) as cursor:
             ingredients = await cursor.fetchall()
 
-    # Проверяем наличие ингредиентов
-    inv = await get_forge_inventory(user_id)
-    for ing in ingredients:
-        if inv.get(ing['item_id'], 0) < ing['quantity']:
-            await callback.answer("❌ Недостаточно ингредиентов!", show_alert=True)
-            return
+        # Проверяем наличие ингредиентов атомарно в той же транзакции
+        for ing in ingredients:
+            async with db.execute(
+                "SELECT quantity FROM forge_inventory WHERE user_id = ? AND item_id = ?",
+                (user_id, ing['item_id'])
+            ) as cursor:
+                row = await cursor.fetchone()
+            if not row or row['quantity'] < ing['quantity']:
+                await callback.answer("❌ Недостаточно ингредиентов!", show_alert=True)
+                return
 
-    # Убираем ингредиенты
-    for ing in ingredients:
-        ok = await remove_forge_item_from_user(user_id, ing['item_id'], ing['quantity'])
-        if not ok:
-            await callback.answer("❌ Ошибка при крафте!", show_alert=True)
-            return
+        # Убираем ингредиенты атомарно
+        for ing in ingredients:
+            await db.execute('''
+                UPDATE forge_inventory SET quantity = quantity - ? WHERE user_id = ? AND item_id = ? AND quantity >= ?
+            ''', (ing['quantity'], user_id, ing['item_id'], ing['quantity']))
+            # Проверяем что UPDATE затронул строку
+            async with db.execute(
+                "SELECT quantity FROM forge_inventory WHERE user_id = ? AND item_id = ?",
+                (user_id, ing['item_id'])
+            ) as cursor:
+                row = await cursor.fetchone()
+            if row and row['quantity'] <= 0:
+                await db.execute("DELETE FROM forge_inventory WHERE user_id = ? AND item_id = ?", (user_id, ing['item_id']))
+            elif not row:
+                # Не хватило — откатываем
+                await db.rollback()
+                await callback.answer("❌ Недостаточно ингредиентов!", show_alert=True)
+                return
 
-    # Выдаём результат
-    await add_forge_item_to_user(user_id, craft['result_item_id'], craft['result_qty'])
+        # Выдаём результат
+        await db.execute('''
+            INSERT INTO forge_inventory (user_id, item_id, quantity)
+            VALUES (?, ?, ?)
+            ON CONFLICT(user_id, item_id) DO UPDATE SET quantity = quantity + ?
+        ''', (user_id, craft['result_item_id'], craft['result_qty'], craft['result_qty']))
 
-    async with aiosqlite.connect(DB_NAME) as db:
         async with db.execute("SELECT name FROM forge_items WHERE id = ?", (craft['result_item_id'],)) as cursor:
             result = await cursor.fetchone()
+
+        await db.commit()
 
     result_name = result['name'] if result else "Предмет"
     await callback.answer(f"✅ Скрафчено: {result_name} x{craft['result_qty']}!", show_alert=True)
@@ -4044,6 +4067,13 @@ async def auction_buy_standard(callback: CallbackQuery):
         async with aiosqlite.connect(DB_NAME) as db:
             await db.execute("UPDATE users SET diamonds = diamonds - ? WHERE user_id = ?", (price, user_id))
             await db.commit()
+    elif currency == 'skin':
+        if user['elephant_skin'] < price:
+            await callback.answer("❌ Недостаточно Кожи слона!", show_alert=True)
+            return
+        async with aiosqlite.connect(DB_NAME) as db:
+            await db.execute("UPDATE users SET elephant_skin = elephant_skin - ? WHERE user_id = ?", (price, user_id))
+            await db.commit()
     else:
         await callback.answer("❌ Неподдерживаемая валюта!", show_alert=True)
         return
@@ -4157,6 +4187,15 @@ async def auction_buy_listing(callback: CallbackQuery):
         async with aiosqlite.connect(DB_NAME) as db:
             await db.execute("UPDATE users SET diamonds = diamonds - ? WHERE user_id = ?", (price, user_id))
             await db.execute("UPDATE users SET diamonds = diamonds + ? WHERE user_id = ?", (price, listing['seller_id']))
+            await db.execute("UPDATE auction_listings SET active = 0 WHERE id = ?", (listing_id,))
+            await db.commit()
+    elif currency == 'skin':
+        if user['elephant_skin'] < price:
+            await callback.answer("❌ Недостаточно Кожи слона!", show_alert=True)
+            return
+        async with aiosqlite.connect(DB_NAME) as db:
+            await db.execute("UPDATE users SET elephant_skin = elephant_skin - ? WHERE user_id = ?", (price, user_id))
+            await db.execute("UPDATE users SET elephant_skin = elephant_skin + ? WHERE user_id = ?", (price, listing['seller_id']))
             await db.execute("UPDATE auction_listings SET active = 0 WHERE id = ?", (listing_id,))
             await db.commit()
     else:
@@ -5528,9 +5567,9 @@ async def book_price_input(message: Message, state: FSMContext):
     if not await check_access(bot, message.from_user.id, message=message): return
     try:
         price = int(message.text)
-        if price < 0: raise ValueError
+        if price <= 0: raise ValueError
     except:
-        await message.answer("❌ Введите положительное число!")
+        await message.answer("❌ Введите положительное число (минимум 1)!")
         return
 
     data = await state.get_data()
