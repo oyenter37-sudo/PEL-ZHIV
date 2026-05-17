@@ -4444,7 +4444,7 @@ async def ai_chat_message(message: Message, state: FSMContext):
         
         for _ in range(max_iterations):
             completion = groq_client.chat.completions.create(
-                model="qwen/qwen3-32b",
+                model="compound",
                 messages=api_messages,
                 tools=AI_TOOLS,
                 temperature=0.6,
