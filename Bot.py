@@ -2783,6 +2783,50 @@ def _draw_decorative_background(image: Image.Image):
         draw.line([(cx, cy), (cx, cy + corner_len * dy)], fill=cc, width=3)
 
 
+def _draw_watermark_tile(image: Image.Image):
+    """Полупрозрачная плиточная водянка 'Говорящий ёж' по всей картинке с наклоном."""
+    width, height = image.size
+
+    # Загружаем шрифт для водянки
+    wm_font = None
+    for sf in [
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+        "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
+        "/usr/share/fonts/truetype/noto-serif-sc/NotoSerifSC-Regular.ttf",
+    ]:
+        try:
+            wm_font = ImageFont.truetype(sf, 28)
+            break
+        except Exception:
+            continue
+    if wm_font is None:
+        wm_font = ImageFont.load_default()
+
+    wm_text = "Говорящий ёж  "
+    # Размер одного тайла
+    tmp_draw = ImageDraw.Draw(Image.new("RGBA", (1, 1), (0, 0, 0, 0)))
+    bbox = tmp_draw.textbbox((0, 0), wm_text, font=wm_font)
+    tile_w = bbox[2] - bbox[0] + 40
+    tile_h = (bbox[3] - bbox[1]) + 40
+
+    # Создаём один тайл с текстом
+    tile = Image.new("RGBA", (tile_w, tile_h), (0, 0, 0, 0))
+    tdraw = ImageDraw.Draw(tile)
+    tdraw.text((20, 20), wm_text, fill=(255, 255, 255, 32), font=wm_font)
+
+    # Поворачиваем тайл на -30°
+    tile = tile.rotate(-30, resample=Image.BICUBIC, expand=True)
+
+    # Замощаем поверх картинки
+    overlay = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+    tw, th = tile.size
+    for y in range(-th, height + th, th):
+        for x in range(-tw, width + tw, tw):
+            overlay.paste(tile, (x, y), tile)
+
+    image.paste(Image.alpha_composite(image.convert("RGBA"), overlay).convert("RGB"))
+
+
 @router.message(UserStates.image_test_text)
 async def image_test_generate(message: Message, state: FSMContext):
     if not HAS_PILLOW:
@@ -2799,6 +2843,9 @@ async def image_test_generate(message: Message, state: FSMContext):
 
         # Декоративный фон
         _draw_decorative_background(image)
+
+        # Плиточная водянка поверх фона
+        _draw_watermark_tile(image)
 
         draw = ImageDraw.Draw(image)
 
@@ -2850,18 +2897,6 @@ async def image_test_generate(message: Message, state: FSMContext):
             draw.text((x, current_y), line, fill=(255, 255, 255), font=font)
 
             current_y += line_heights[i] + line_spacing
-
-        # Водяной знак
-        small_font = None
-        for sf in ["/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf"]:
-            try:
-                small_font = ImageFont.truetype(sf, 16)
-                break
-            except Exception:
-                continue
-        if small_font is None:
-            small_font = ImageFont.load_default()
-        draw.text((width - 150, height - 38), "🦔 Говорящий Ёж v5", fill=(200, 180, 255, 140), font=small_font)
 
         bio = io.BytesIO()
         image.save(bio, 'PNG')
