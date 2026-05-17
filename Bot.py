@@ -400,6 +400,61 @@ async def init_db():
                 current_item_id INTEGER DEFAULT NULL
             )
         ''')
+
+        # Майнинг: каталог комплектующих
+        await db.execute('''
+            CREATE TABLE IF NOT EXISTS mining_components (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL,
+                comp_type TEXT NOT NULL,
+                price INTEGER NOT NULL,
+                currency TEXT DEFAULT 'balance',
+                mh_rate REAL DEFAULT 0,
+                power_w INTEGER DEFAULT 0,
+                gpu_slots INTEGER DEFAULT 0,
+                break_reduction REAL DEFAULT 0,
+                UNIQUE(name)
+            )
+        ''')
+
+        # Майнинг: инвентарь комплектующих игрока
+        await db.execute('''
+            CREATE TABLE IF NOT EXISTS mining_inventory (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                component_id INTEGER NOT NULL,
+                quantity INTEGER DEFAULT 0,
+                is_broken INTEGER DEFAULT 0,
+                UNIQUE(user_id, component_id),
+                FOREIGN KEY (component_id) REFERENCES mining_components(id)
+            )
+        ''')
+
+        # Майнинг: риги (собранные установки)
+        await db.execute('''
+            CREATE TABLE IF NOT EXISTS mining_rigs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                rig_name TEXT DEFAULT 'Риг',
+                gpu_id INTEGER NOT NULL,
+                psu_id INTEGER NOT NULL,
+                mobo_id INTEGER NOT NULL,
+                cooling_id INTEGER DEFAULT NULL,
+                is_active INTEGER DEFAULT 0,
+                created_at TEXT
+            )
+        ''')
+
+        # Майнинг: состояние игрока
+        await db.execute('''
+            CREATE TABLE IF NOT EXISTS mining_state (
+                user_id INTEGER PRIMARY KEY,
+                ezhcoins REAL DEFAULT 0,
+                is_mining INTEGER DEFAULT 0,
+                total_mined REAL DEFAULT 0,
+                last_mine TEXT DEFAULT NULL
+            )
+        ''')
         
         # 2. МИГРАЦИЯ (ДОБАВЛЕНИЕ КОЛОНОК)
         new_columns = [
@@ -454,10 +509,37 @@ async def init_db():
             ("feed_cost", "150"), # Legacy, but kept in DB
             ("ant_catch_cost", "200"),
             ("ant_income", "10"),
-            ("daily_bonus", "25")
+            ("daily_bonus", "25"),
+            ("mining_electricity_rate", "1"),  # 1 Ежидзик за 10W/час
+            ("mining_base_coin_rate", "0.5"),  # базовый курс Ежкоина
+            ("mining_max_rigs", "5")
         ]
         for key, value in default_settings:
             await db.execute("INSERT OR IGNORE INTO bot_settings (key, value) VALUES (?, ?)", (key, value))
+
+        # Каталог комплектующих для майнинга
+        mining_components = [
+            # Видеокарты (comp_type='gpu', mh_rate, power_w)
+            ("GT 710", "gpu", 500, "balance", 1, 30, 0, 0),
+            ("GTX 1060", "gpu", 1500, "balance", 4, 120, 0, 0),
+            ("RTX 3060", "gpu", 4000, "balance", 12, 170, 0, 0),
+            ("RTX 4090", "gpu", 12000, "balance", 40, 450, 0, 0),
+            # Блоки питания (comp_type='psu', gpu_slots=сколько карт тянет)
+            ("БП 500W", "psu", 300, "balance", 0, 0, 1, 0),
+            ("БП 1000W", "psu", 800, "balance", 0, 0, 2, 0),
+            ("БП 2000W", "psu", 2000, "balance", 0, 0, 5, 0),
+            # Материнские платы (comp_type='mobo', 1 риг = 1 плата)
+            ("Плата H110", "mobo", 1000, "balance", 0, 0, 0, 0),
+            # Охлаждение (comp_type='cooling', break_reduction=снижение шанса поломки)
+            ("Вентилятор 120мм", "cooling", 500, "balance", 0, 0, 0, 0.10),
+            ("Водяное охлаждение", "cooling", 2000, "balance", 0, 0, 0, 0.30),
+        ]
+        for comp in mining_components:
+            await db.execute('''
+                INSERT OR IGNORE INTO mining_components 
+                (name, comp_type, price, currency, mh_rate, power_w, gpu_slots, break_reduction)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            ''', comp)
         
         await db.commit()
         
@@ -931,6 +1013,12 @@ class ForgeStates(StatesGroup):
     # Поиск крафтов
     waiting_craft_search = State()
 
+class MiningStates(StatesGroup):
+    # Обмен Ежкоинов
+    waiting_exchange_amount = State()
+    # Покупка комплектующих
+    waiting_buy_qty = State()
+
 # =====================================
 # 🦔 ГОВОРЯЩИЙ ЕЖ - ЧАСТЬ 2/5 🦔
 # =====================================
@@ -1033,6 +1121,7 @@ def puzzle_keyboard():
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="🛒 Магазин", callback_data="shop", style=ButtonStyle.SUCCESS)],
         [InlineKeyboardButton(text="⚒️ Кузница", callback_data="forge", style=ButtonStyle.PRIMARY)],
+        [InlineKeyboardButton(text="💻 Майнинг", callback_data="mining", style=ButtonStyle.PRIMARY)],
         [InlineKeyboardButton(text="🤖 ИИ-ЕЖ", callback_data="stub_ai")],
         [InlineKeyboardButton(text="Назад ◀️◀️◀️", callback_data="menu")]
     ])
@@ -1091,6 +1180,16 @@ def auction_currency_keyboard(action_data: str):
          InlineKeyboardButton(text="💎 Алмазы", callback_data=f"{action_data}_diamonds")],
         [InlineKeyboardButton(text="🐘 Кожа слона", callback_data=f"{action_data}_skin")],
         [InlineKeyboardButton(text="❌ Отмена", callback_data="forge_auction")]
+    ])
+
+
+def mining_keyboard():
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🛒 Рынок", callback_data="mining_market", style=ButtonStyle.SUCCESS),
+         InlineKeyboardButton(text="🔧 Мой риг", callback_data="mining_rig")],
+        [InlineKeyboardButton(text="⚡ Майнинг", callback_data="mining_dashboard", style=ButtonStyle.PRIMARY),
+         InlineKeyboardButton(text="💱 Обмен", callback_data="mining_exchange")],
+        [InlineKeyboardButton(text="Назад ◀️◀️◀️", callback_data="puzzle")]
     ])
 
 
@@ -4453,6 +4552,826 @@ async def forge_inventory_item(callback: CallbackQuery):
 
     buttons = [[InlineKeyboardButton(text="Назад ◀️◀️◀️", callback_data="forge_inventory")]]
     await safe_edit_text(callback.message, text, reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons), parse_mode="Markdown")
+
+
+# =====================================
+# 💻 МАЙНИНГ
+# =====================================
+
+# --- Вспомогательные функции ---
+
+async def get_mining_state(user_id: int) -> dict:
+    """Получает или создаёт состояние майнинга игрока."""
+    async with aiosqlite.connect(DB_NAME) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute("SELECT * FROM mining_state WHERE user_id = ?", (user_id,)) as cursor:
+            row = await cursor.fetchone()
+        if not row:
+            await db.execute("INSERT OR IGNORE INTO mining_state (user_id) VALUES (?)", (user_id,))
+            await db.commit()
+            async with db.execute("SELECT * FROM mining_state WHERE user_id = ?", (user_id,)) as cursor:
+                row = await cursor.fetchone()
+    return dict(row) if row else {"user_id": user_id, "ezhcoins": 0, "is_mining": 0, "total_mined": 0, "last_mine": None}
+
+
+async def get_mining_inventory(user_id: int) -> dict:
+    """Возвращает dict {component_id: {quantity, is_broken}} инвентаря майнинга."""
+    async with aiosqlite.connect(DB_NAME) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute(
+            "SELECT mi.*, mc.name, mc.comp_type FROM mining_inventory mi "
+            "JOIN mining_components mc ON mi.component_id = mc.id "
+            "WHERE mi.user_id = ? AND mi.quantity > 0",
+            (user_id,)
+        ) as cursor:
+            rows = await cursor.fetchall()
+    result = {}
+    for row in rows:
+        result[row['component_id']] = dict(row)
+    return result
+
+
+async def get_user_rigs(user_id: int) -> list:
+    """Получает все риги игрока."""
+    async with aiosqlite.connect(DB_NAME) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute("SELECT * FROM mining_rigs WHERE user_id = ?", (user_id,)) as cursor:
+            return [dict(row) for row in await cursor.fetchall()]
+
+
+async def calc_rig_stats(rig: dict) -> dict:
+    """Рассчитывает хешрейт, потребление и защиту рига."""
+    async with aiosqlite.connect(DB_NAME) as db:
+        db.row_factory = aiosqlite.Row
+        stats = {"mh": 0, "power": 0, "break_reduction": 0, "gpu_name": "?", "psu_name": "?", "mobo_name": "?"}
+        
+        async with db.execute("SELECT * FROM mining_components WHERE id = ?", (rig['gpu_id'],)) as cursor:
+            gpu = await cursor.fetchone()
+        if gpu:
+            stats['mh'] += gpu['mh_rate']
+            stats['power'] += gpu['power_w']
+            stats['gpu_name'] = gpu['name']
+
+        async with db.execute("SELECT * FROM mining_components WHERE id = ?", (rig['psu_id'],)) as cursor:
+            psu = await cursor.fetchone()
+        if psu:
+            stats['psu_name'] = psu['name']
+
+        async with db.execute("SELECT * FROM mining_components WHERE id = ?", (rig['mobo_id'],)) as cursor:
+            mobo = await cursor.fetchone()
+        if mobo:
+            stats['mobo_name'] = mobo['name']
+
+        if rig.get('cooling_id'):
+            async with db.execute("SELECT * FROM mining_components WHERE id = ?", (rig['cooling_id'],)) as cursor:
+                cool = await cursor.fetchone()
+            if cool:
+                stats['break_reduction'] = cool['break_reduction']
+                stats['cooling_name'] = cool['name']
+            else:
+                stats['cooling_name'] = None
+        else:
+            stats['cooling_name'] = None
+
+    return stats
+
+
+async def get_ezhcoin_rate() -> float:
+    """Рассчитывает текущий курс Ежкоина в Ежидзиках."""
+    base_rate = float(await get_setting("mining_base_coin_rate", "0.5"))
+    async with aiosqlite.connect(DB_NAME) as db:
+        async with db.execute("SELECT COALESCE(SUM(total_mined), 0) FROM mining_state") as cursor:
+            total_mined = (await cursor.fetchone())[0]
+    # Курс падает по мере накопления Ежкоинов в экономике
+    rate = base_rate * 45 / (1 + total_mined / 10000)
+    return max(rate, 0.1)  # Минимальный курс
+
+
+async def ensure_mining_state(user_id: int):
+    """Создаёт запись mining_state если её нет."""
+    async with aiosqlite.connect(DB_NAME) as db:
+        await db.execute("INSERT OR IGNORE INTO mining_state (user_id) VALUES (?)", (user_id,))
+        await db.commit()
+
+
+# --- ГЛАВНОЕ МЕНЮ МАЙНИНГА ---
+@router.callback_query(F.data == "mining")
+async def mining_menu(callback: CallbackQuery, state: FSMContext):
+    await state.clear()
+    if not await check_access(bot, callback.from_user.id, callback):
+        return
+    await ensure_mining_state(callback.from_user.id)
+    ms = await get_mining_state(callback.from_user.id)
+    rigs = await get_user_rigs(callback.from_user.id)
+    rate = await get_ezhcoin_rate()
+    
+    text = (
+        "💻 **Майнинг**\n\n"
+        f"💰 Ежкоины: **{ms['ezhcoins']:.2f}**\n"
+        f"📊 Курс: 1 Ежкоин = {rate:.2f} Ежидзиков\n"
+        f"🔧 Ригов: {len(rigs)}\n"
+        f"{'🟢 Майнинг активен' if ms['is_mining'] else '🔴 Майнинг остановлен'}\n\n"
+        "Выбери раздел:"
+    )
+    await safe_edit_text(callback.message, text, reply_markup=mining_keyboard(), parse_mode="Markdown")
+
+
+# --- РЫНОК КОМПЛЕКТУЮЩИХ ---
+@router.callback_query(F.data == "mining_market")
+async def mining_market_menu(callback: CallbackQuery):
+    async with aiosqlite.connect(DB_NAME) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute("SELECT * FROM mining_components ORDER BY comp_type, price") as cursor:
+            components = await cursor.fetchall()
+
+    if not components:
+        await callback.answer("🏪 Рынок пуст!", show_alert=True)
+        return
+
+    text = "🛒 **Рынок комплектующих**\n\n"
+    buttons = []
+    type_labels = {"gpu": "🖥 Видеокарты", "psu": "🔌 Блоки питания", "mobo": "🔲 Мат. платы", "cooling": "❄️ Охлаждение"}
+    current_type = None
+    
+    for comp in components:
+        if comp['comp_type'] != current_type:
+            current_type = comp['comp_type']
+            label = type_labels.get(current_type, current_type)
+            text += f"\n**{label}:**\n"
+        
+        curr = CURRENCY_LABELS.get(comp['currency'], comp['currency'])
+        info = f"  • {comp['name']} — {comp['price']} {curr}"
+        if comp['mh_rate'] > 0:
+            info += f" | {comp['mh_rate']} MH/s"
+        if comp['power_w'] > 0:
+            info += f" | {comp['power_w']}W"
+        if comp['gpu_slots'] > 0:
+            info += f" | до {comp['gpu_slots']} карт"
+        if comp['break_reduction'] > 0:
+            info += f" | -{int(comp['break_reduction']*100)}% поломка"
+        text += info + "\n"
+        
+        buttons.append([InlineKeyboardButton(
+            text=f"🛒 {comp['name']} — {comp['price']} {curr}",
+            callback_data=f"mbuy_{comp['id']}"
+        )])
+
+    buttons.append([InlineKeyboardButton(text="Назад ◀️◀️◀️", callback_data="mining")])
+    await safe_edit_text(callback.message, text, reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons), parse_mode="Markdown")
+
+
+@router.callback_query(F.data.startswith("mbuy_"))
+async def mining_buy_component(callback: CallbackQuery):
+    """Покупка комплектующего."""
+    comp_id = int(callback.data.replace("mbuy_", ""))
+    user_id = callback.from_user.id
+
+    async with aiosqlite.connect(DB_NAME) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute("SELECT * FROM mining_components WHERE id = ?", (comp_id,)) as cursor:
+            comp = await cursor.fetchone()
+        if not comp:
+            await callback.answer("❌ Товар не найден!", show_alert=True)
+            return
+
+        user = await get_user(user_id)
+        if not user:
+            await callback.answer("❌ Нажми /start!", show_alert=True)
+            return
+
+        price = comp['price']
+        currency = comp['currency']
+
+        # Проверяем и списываем
+        if currency == 'balance':
+            if user['balance'] < price:
+                await callback.answer("❌ Недостаточно Ежидзиков!", show_alert=True)
+                return
+            cursor = await db.execute("UPDATE users SET balance = balance - ? WHERE user_id = ? AND balance >= ?", (price, user_id, price))
+            if cursor.rowcount == 0:
+                await callback.answer("❌ Недостаточно Ежидзиков!", show_alert=True)
+                return
+        elif currency == 'diamonds':
+            if user['diamonds'] < price:
+                await callback.answer("❌ Недостаточно алмазов!", show_alert=True)
+                return
+            cursor = await db.execute("UPDATE users SET diamonds = diamonds - ? WHERE user_id = ? AND diamonds >= ?", (price, user_id, price))
+            if cursor.rowcount == 0:
+                await callback.answer("❌ Недостаточно алмазов!", show_alert=True)
+                return
+        elif currency == 'skin':
+            if user['elephant_skin'] < price:
+                await callback.answer("❌ Недостаточно Кожи слона!", show_alert=True)
+                return
+            cursor = await db.execute("UPDATE users SET elephant_skin = elephant_skin - ? WHERE user_id = ? AND elephant_skin >= ?", (price, user_id, price))
+            if cursor.rowcount == 0:
+                await callback.answer("❌ Недостаточно Кожи слона!", show_alert=True)
+                return
+        else:
+            await callback.answer("❌ Неподдерживаемая валюта!", show_alert=True)
+            return
+
+        # Добавляем в инвентарь
+        await db.execute('''
+            INSERT INTO mining_inventory (user_id, component_id, quantity, is_broken)
+            VALUES (?, ?, 1, 0)
+            ON CONFLICT(user_id, component_id) DO UPDATE SET quantity = quantity + 1
+        ''', (user_id, comp_id))
+        await db.commit()
+
+    curr_name = CURRENCY_LABELS.get(currency, currency)
+    await callback.answer(f"✅ Куплено: {comp['name']} за {price} {curr_name}!", show_alert=True)
+    await mining_market_menu(callback)
+
+
+# --- МОЙ РИГ ---
+@router.callback_query(F.data == "mining_rig")
+async def mining_rig_menu(callback: CallbackQuery, state: FSMContext):
+    await state.clear()
+    user_id = callback.from_user.id
+    inv = await get_mining_inventory(user_id)
+    rigs = await get_user_rigs(user_id)
+    max_rigs = int(await get_setting("mining_max_rigs", "5"))
+
+    text = "🔧 **Мои риги**\n\n"
+    buttons = []
+
+    if rigs:
+        for i, rig in enumerate(rigs):
+            stats = await calc_rig_stats(rig)
+            status = "🟢" if rig['is_active'] else "🔴"
+            cool_text = f"\n   ❄️ {stats.get('cooling_name', 'нет')}" if stats.get('cooling_name') else ""
+            text += (
+                f"{status} **Риг #{i+1}**\n"
+                f"   🖥 {stats['gpu_name']} ({stats['mh']} MH/s)\n"
+                f"   🔌 {stats['psu_name']}\n"
+                f"   🔲 {stats['mobo_name']}{cool_text}\n\n"
+            )
+            buttons.append([InlineKeyboardButton(
+                text=f"{'🟢' if rig['is_active'] else '🔴'} Риг #{i+1} — {stats['gpu_name']}",
+                callback_data=f"mrig_{rig['id']}"
+            )])
+    else:
+        text += "📭 У тебя нет ригов!\n\n"
+
+    # Кнопка сборки если есть компоненты и не достигнут лимит
+    has_gpu = any(v['comp_type'] == 'gpu' and v['quantity'] > v.get('is_broken', 0) for v in inv.values())
+    has_psu = any(v['comp_type'] == 'psu' and v['quantity'] > v.get('is_broken', 0) for v in inv.values())
+    has_mobo = any(v['comp_type'] == 'mobo' and v['quantity'] > v.get('is_broken', 0) for v in inv.values())
+
+    if has_gpu and has_psu and has_mobo and len(rigs) < max_rigs:
+        buttons.append([InlineKeyboardButton(text="➕ Собрать риг", callback_data="mrig_build", style=ButtonStyle.SUCCESS)])
+    elif len(rigs) >= max_rigs:
+        text += f"⚠️ Максимум ригов: {max_rigs}\n"
+
+    buttons.append([InlineKeyboardButton(text="📦 Мои комплектующие", callback_data="mining_parts")])
+    buttons.append([InlineKeyboardButton(text="Назад ◀️◀️◀️", callback_data="mining")])
+    await safe_edit_text(callback.message, text, reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons), parse_mode="Markdown")
+
+
+@router.callback_query(F.data == "mining_parts")
+async def mining_parts_list(callback: CallbackQuery):
+    """Показать все комплектующие игрока."""
+    user_id = callback.from_user.id
+    inv = await get_mining_inventory(user_id)
+
+    if not inv:
+        await callback.answer("📦 У тебя нет комплектующих!", show_alert=True)
+        return
+
+    type_labels = {"gpu": "🖥 Видеокарты", "psu": "🔌 Блоки питания", "mobo": "🔲 Мат. платы", "cooling": "❄️ Охлаждение"}
+    text = "📦 **Мои комплектующие**\n\n"
+    buttons = []
+    by_type = {}
+    for comp_id, item in inv.items():
+        t = item['comp_type']
+        if t not in by_type:
+            by_type[t] = []
+        by_type[t].append(item)
+
+    for comp_type, items in by_type.items():
+        label = type_labels.get(comp_type, comp_type)
+        text += f"**{label}:**\n"
+        for item in items:
+            broken = " 💥" if item['is_broken'] else ""
+            text += f"  • {item['name']} x{item['quantity']}{broken}\n"
+            if item['is_broken']:
+                # Кнопка починки
+                async with aiosqlite.connect(DB_NAME) as db:
+                    db.row_factory = aiosqlite.Row
+                    async with db.execute("SELECT price FROM mining_components WHERE id = ?", (item['component_id'],)) as cursor:
+                        comp = await cursor.fetchone()
+                if comp:
+                    repair_cost = comp['price'] // 3
+                    buttons.append([InlineKeyboardButton(
+                        text=f"🔧 Починить {item['name']} ({repair_cost} Ежидзиков)",
+                        callback_data=f"mrepair_{item['component_id']}"
+                    )])
+
+    buttons.append([InlineKeyboardButton(text="Назад ◀️◀️◀️", callback_data="mining_rig")])
+    await safe_edit_text(callback.message, text, reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons), parse_mode="Markdown")
+
+
+@router.callback_query(F.data.startswith("mrepair_"))
+async def mining_repair(callback: CallbackQuery):
+    """Починка сломанного компонента."""
+    comp_id = int(callback.data.replace("mrepair_", ""))
+    user_id = callback.from_user.id
+
+    async with aiosqlite.connect(DB_NAME) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute("SELECT * FROM mining_components WHERE id = ?", (comp_id,)) as cursor:
+            comp = await cursor.fetchone()
+        if not comp:
+            await callback.answer("❌ Компонент не найден!", show_alert=True)
+            return
+
+        async with db.execute(
+            "SELECT * FROM mining_inventory WHERE user_id = ? AND component_id = ? AND is_broken > 0",
+            (user_id, comp_id)
+        ) as cursor:
+            inv = await cursor.fetchone()
+        if not inv:
+            await callback.answer("❌ Нечего чинить!", show_alert=True)
+            return
+
+        repair_cost = comp['price'] // 3
+        cursor = await db.execute("UPDATE users SET balance = balance - ? WHERE user_id = ? AND balance >= ?", (repair_cost, user_id, repair_cost))
+        if cursor.rowcount == 0:
+            await callback.answer(f"❌ Нужно {repair_cost} Ежидзиков на починку!", show_alert=True)
+            return
+
+        await db.execute("UPDATE mining_inventory SET is_broken = is_broken - 1 WHERE user_id = ? AND component_id = ?", (user_id, comp_id))
+        await db.commit()
+
+    await callback.answer(f"✅ Починено: {comp['name']} за {repair_cost} Ежидзиков!", show_alert=True)
+    await mining_parts_list(callback)
+
+
+@router.callback_query(lambda c: c.data and c.data.startswith("mrig_") and not c.data.startswith("mrig_build") and c.data[5:].isdigit())
+async def mining_rig_detail(callback: CallbackQuery):
+    """Детали рига — включить/выключить, удалить."""
+    rig_id = int(callback.data.replace("mrig_", ""))
+    user_id = callback.from_user.id
+
+    async with aiosqlite.connect(DB_NAME) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute("SELECT * FROM mining_rigs WHERE id = ? AND user_id = ?", (rig_id, user_id)) as cursor:
+            rig = await cursor.fetchone()
+        if not rig:
+            await callback.answer("❌ Риг не найден!", show_alert=True)
+            return
+
+    rig_dict = dict(rig)
+    stats = await calc_rig_stats(rig_dict)
+    status = "🟢 Активен" if rig['is_active'] else "🔴 Остановлен"
+    
+    elec_rate = float(await get_setting("mining_electricity_rate", "1"))
+    elec_cost = (stats['power'] / 10) * elec_rate
+
+    text = (
+        f"🔧 **Риг #{rig_id}**\n\n"
+        f"Статус: {status}\n"
+        f"🖥 Видеокарта: {stats['gpu_name']}\n"
+        f"🔌 Блок питания: {stats['psu_name']}\n"
+        f"🔲 Мат. плата: {stats['mobo_name']}\n"
+    )
+    if stats.get('cooling_name'):
+        text += f"❄️ Охлаждение: {stats['cooling_name']} (-{int(stats['break_reduction']*100)}% поломка)\n"
+    text += (
+        f"\n📊 Хешрейт: **{stats['mh']} MH/s**\n"
+        f"⚡ Потребление: **{stats['power']}W**\n"
+        f"💸 Электричество: **{elec_cost:.0f} Ежидзиков/час**\n"
+    )
+
+    buttons = []
+    if rig['is_active']:
+        buttons.append([InlineKeyboardButton(text="⏹ Остановить", callback_data=f"mrigstop_{rig_id}", style=ButtonStyle.DANGER)])
+    else:
+        buttons.append([InlineKeyboardButton(text="▶️ Запустить", callback_data=f"mrigstart_{rig_id}", style=ButtonStyle.SUCCESS)])
+    buttons.append([InlineKeyboardButton(text="🗑 Разобрать риг", callback_data=f"mrigdel_{rig_id}", style=ButtonStyle.DANGER)])
+    buttons.append([InlineKeyboardButton(text="Назад ◀️◀️◀️", callback_data="mining_rig")])
+    await safe_edit_text(callback.message, text, reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons), parse_mode="Markdown")
+
+
+@router.callback_query(F.data.startswith("mrigstart_"))
+async def mining_rig_start(callback: CallbackQuery):
+    rig_id = int(callback.data.replace("mrigstart_", ""))
+    user_id = callback.from_user.id
+    async with aiosqlite.connect(DB_NAME) as db:
+        await db.execute("UPDATE mining_rigs SET is_active = 1 WHERE id = ? AND user_id = ?", (rig_id, user_id))
+        await db.commit()
+    await callback.answer("▶️ Риг запущен!", show_alert=True)
+    await mining_rig_detail(callback)
+
+
+@router.callback_query(F.data.startswith("mrigstop_"))
+async def mining_rig_stop(callback: CallbackQuery):
+    rig_id = int(callback.data.replace("mrigstop_", ""))
+    user_id = callback.from_user.id
+    async with aiosqlite.connect(DB_NAME) as db:
+        await db.execute("UPDATE mining_rigs SET is_active = 0 WHERE id = ? AND user_id = ?", (rig_id, user_id))
+        await db.commit()
+    await callback.answer("⏹ Риг остановлен!", show_alert=True)
+    await mining_rig_detail(callback)
+
+
+@router.callback_query(F.data.startswith("mrigdel_"))
+async def mining_rig_delete(callback: CallbackQuery):
+    """Разобрать риг — компоненты возвращаются в инвентарь."""
+    rig_id = int(callback.data.replace("mrigdel_", ""))
+    user_id = callback.from_user.id
+
+    async with aiosqlite.connect(DB_NAME) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute("SELECT * FROM mining_rigs WHERE id = ? AND user_id = ?", (rig_id, user_id)) as cursor:
+            rig = await cursor.fetchone()
+        if not rig:
+            await callback.answer("❌ Риг не найден!", show_alert=True)
+            return
+
+        # Возвращаем компоненты в инвентарь
+        for comp_id in [rig['gpu_id'], rig['psu_id'], rig['mobo_id']]:
+            if comp_id:
+                await db.execute('''
+                    INSERT INTO mining_inventory (user_id, component_id, quantity, is_broken)
+                    VALUES (?, ?, 1, 0)
+                    ON CONFLICT(user_id, component_id) DO UPDATE SET quantity = quantity + 1
+                ''', (user_id, comp_id))
+        if rig['cooling_id']:
+            await db.execute('''
+                INSERT INTO mining_inventory (user_id, component_id, quantity, is_broken)
+                VALUES (?, ?, 1, 0)
+                ON CONFLICT(user_id, component_id) DO UPDATE SET quantity = quantity + 1
+            ''', (user_id, rig['cooling_id']))
+
+        await db.execute("DELETE FROM mining_rigs WHERE id = ?", (rig_id,))
+        await db.commit()
+
+    await callback.answer("🗑 Риг разобран, компоненты возвращены!", show_alert=True)
+    await mining_rig_menu(callback, None)
+
+
+@router.callback_query(F.data == "mrig_build")
+async def mining_rig_build_start(callback: CallbackQuery, state: FSMContext):
+    """Начало сборки рига — выбор видеокарты."""
+    user_id = callback.from_user.id
+    inv = await get_mining_inventory(user_id)
+
+    gpus = [(k, v) for k, v in inv.items() if v['comp_type'] == 'gpu' and v['quantity'] > v.get('is_broken', 0)]
+    if not gpus:
+        await callback.answer("❌ Нет видеокарт! Купи на рынке.", show_alert=True)
+        return
+
+    text = "🖥 **Сборка рига — Шаг 1/4**\n\nВыбери видеокарту:"
+    buttons = []
+    for comp_id, item in gpus:
+        async with aiosqlite.connect(DB_NAME) as db:
+            db.row_factory = aiosqlite.Row
+            async with db.execute("SELECT mh_rate FROM mining_components WHERE id = ?", (comp_id,)) as cursor:
+                comp = await cursor.fetchone()
+        mh = comp['mh_rate'] if comp else 0
+        buttons.append([InlineKeyboardButton(
+            text=f"🖥 {item['name']} ({mh} MH/s)",
+            callback_data=f"mbuild_gpu_{comp_id}"
+        )])
+    buttons.append([InlineKeyboardButton(text="❌ Отмена", callback_data="mining_rig")])
+    await safe_edit_text(callback.message, text, reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons), parse_mode="Markdown")
+
+
+@router.callback_query(F.data.startswith("mbuild_gpu_"))
+async def mining_rig_build_psu(callback: CallbackQuery, state: FSMContext):
+    gpu_id = int(callback.data.replace("mbuild_gpu_", ""))
+    await state.update_data(build_gpu=gpu_id)
+    
+    user_id = callback.from_user.id
+    inv = await get_mining_inventory(user_id)
+    psus = [(k, v) for k, v in inv.items() if v['comp_type'] == 'psu' and v['quantity'] > v.get('is_broken', 0)]
+    if not psus:
+        await callback.answer("❌ Нет блоков питания! Купи на рынке.", show_alert=True)
+        return
+
+    text = "🔌 **Сборка рига — Шаг 2/4**\n\nВыбери блок питания:"
+    buttons = []
+    for comp_id, item in psus:
+        async with aiosqlite.connect(DB_NAME) as db:
+            db.row_factory = aiosqlite.Row
+            async with db.execute("SELECT gpu_slots FROM mining_components WHERE id = ?", (comp_id,)) as cursor:
+                comp = await cursor.fetchone()
+        slots = comp['gpu_slots'] if comp else 0
+        buttons.append([InlineKeyboardButton(
+            text=f"🔌 {item['name']} (до {slots} карт)",
+            callback_data=f"mbuild_psu_{comp_id}"
+        )])
+    buttons.append([InlineKeyboardButton(text="❌ Отмена", callback_data="mining_rig")])
+    await safe_edit_text(callback.message, text, reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons), parse_mode="Markdown")
+
+
+@router.callback_query(F.data.startswith("mbuild_psu_"))
+async def mining_rig_build_mobo(callback: CallbackQuery, state: FSMContext):
+    psu_id = int(callback.data.replace("mbuild_psu_", ""))
+    await state.update_data(build_psu=psu_id)
+    
+    user_id = callback.from_user.id
+    inv = await get_mining_inventory(user_id)
+    mobos = [(k, v) for k, v in inv.items() if v['comp_type'] == 'mobo' and v['quantity'] > v.get('is_broken', 0)]
+    if not mobos:
+        await callback.answer("❌ Нет мат. плат! Купи на рынке.", show_alert=True)
+        return
+
+    text = "🔲 **Сборка рига — Шаг 3/4**\n\nВыбери материнскую плату:"
+    buttons = []
+    for comp_id, item in mobos:
+        buttons.append([InlineKeyboardButton(
+            text=f"🔲 {item['name']}",
+            callback_data=f"mbuild_mobo_{comp_id}"
+        )])
+    buttons.append([InlineKeyboardButton(text="❌ Отмена", callback_data="mining_rig")])
+    await safe_edit_text(callback.message, text, reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons), parse_mode="Markdown")
+
+
+@router.callback_query(F.data.startswith("mbuild_mobo_"))
+async def mining_rig_build_cooling(callback: CallbackQuery, state: FSMContext):
+    mobo_id = int(callback.data.replace("mbuild_mobo_", ""))
+    await state.update_data(build_mobo=mobo_id)
+    
+    user_id = callback.from_user.id
+    inv = await get_mining_inventory(user_id)
+    coolings = [(k, v) for k, v in inv.items() if v['comp_type'] == 'cooling' and v['quantity'] > v.get('is_broken', 0)]
+
+    text = "❄️ **Сборка рига — Шаг 4/4**\n\nВыбери охлаждение (или пропусти):"
+    buttons = []
+    for comp_id, item in coolings:
+        async with aiosqlite.connect(DB_NAME) as db:
+            db.row_factory = aiosqlite.Row
+            async with db.execute("SELECT break_reduction FROM mining_components WHERE id = ?", (comp_id,)) as cursor:
+                comp = await cursor.fetchone()
+        br = int((comp['break_reduction'] if comp else 0) * 100)
+        buttons.append([InlineKeyboardButton(
+            text=f"❄️ {item['name']} (-{br}% поломка)",
+            callback_data=f"mbuild_cool_{comp_id}"
+        )])
+    buttons.append([InlineKeyboardButton(text="⏭ Без охлаждения", callback_data="mbuild_cool_0")])
+    buttons.append([InlineKeyboardButton(text="❌ Отмена", callback_data="mining_rig")])
+    await safe_edit_text(callback.message, text, reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons), parse_mode="Markdown")
+
+
+@router.callback_query(F.data.startswith("mbuild_cool_"))
+async def mining_rig_build_finish(callback: CallbackQuery, state: FSMContext):
+    """Финальный шаг сборки — создаём риг."""
+    cooling_id = int(callback.data.replace("mbuild_cool_", ""))
+    if cooling_id == 0:
+        cooling_id = None
+    
+    data = await state.get_data()
+    await state.clear()
+    gpu_id = data.get('build_gpu')
+    psu_id = data.get('build_psu')
+    mobo_id = data.get('build_mobo')
+    user_id = callback.from_user.id
+
+    if not gpu_id or not psu_id or not mobo_id:
+        await callback.answer("❌ Ошибка сборки!", show_alert=True)
+        return
+
+    # Всё в одной транзакции — списываем компоненты и создаём риг
+    async with aiosqlite.connect(DB_NAME) as db:
+        # Списываем GPU
+        cursor = await db.execute(
+            "UPDATE mining_inventory SET quantity = quantity - 1 WHERE user_id = ? AND component_id = ? AND quantity > 0",
+            (user_id, gpu_id)
+        )
+        if cursor.rowcount == 0:
+            await callback.answer("❌ Видеокарта недоступна!", show_alert=True)
+            return
+        # Списываем PSU
+        cursor = await db.execute(
+            "UPDATE mining_inventory SET quantity = quantity - 1 WHERE user_id = ? AND component_id = ? AND quantity > 0",
+            (user_id, psu_id)
+        )
+        if cursor.rowcount == 0:
+            await db.rollback()
+            await callback.answer("❌ Блок питания недоступен!", show_alert=True)
+            return
+        # Списываем Motherboard
+        cursor = await db.execute(
+            "UPDATE mining_inventory SET quantity = quantity - 1 WHERE user_id = ? AND component_id = ? AND quantity > 0",
+            (user_id, mobo_id)
+        )
+        if cursor.rowcount == 0:
+            await db.rollback()
+            await callback.answer("❌ Мат. плата недоступна!", show_alert=True)
+            return
+        # Списываем Cooling (если есть)
+        if cooling_id:
+            cursor = await db.execute(
+                "UPDATE mining_inventory SET quantity = quantity - 1 WHERE user_id = ? AND component_id = ? AND quantity > 0",
+                (user_id, cooling_id)
+            )
+            if cursor.rowcount == 0:
+                await db.rollback()
+                await callback.answer("❌ Охлаждение недоступно!", show_alert=True)
+                return
+
+        # Проверяем лимит ригов
+        max_rigs = int(await get_setting("mining_max_rigs", "5"))
+        async with db.execute("SELECT COUNT(*) FROM mining_rigs WHERE user_id = ?", (user_id,)) as cursor:
+            rig_count = (await cursor.fetchone())[0]
+        if rig_count >= max_rigs:
+            await db.rollback()
+            await callback.answer(f"❌ Максимум ригов: {max_rigs}!", show_alert=True)
+            return
+
+        # Создаём риг
+        await db.execute('''
+            INSERT INTO mining_rigs (user_id, gpu_id, psu_id, mobo_id, cooling_id, is_active, created_at)
+            VALUES (?, ?, ?, ?, ?, 0, ?)
+        ''', (user_id, gpu_id, psu_id, mobo_id, cooling_id, datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
+
+        # Чистим нулевые количества
+        await db.execute("DELETE FROM mining_inventory WHERE quantity <= 0")
+        await db.commit()
+
+    await callback.answer("✅ Риг собран! Запусти его в меню ригов.", show_alert=True)
+    await mining_rig_menu(callback, None)
+
+
+# --- ДАШБОРД МАЙНИНГА ---
+@router.callback_query(F.data == "mining_dashboard")
+async def mining_dashboard(callback: CallbackQuery):
+    user_id = callback.from_user.id
+    await ensure_mining_state(user_id)
+    ms = await get_mining_state(user_id)
+    rigs = await get_user_rigs(user_id)
+    active_rigs = [r for r in rigs if r['is_active']]
+
+    total_mh = 0
+    total_power = 0
+    total_break_reduction = 0
+    for rig in active_rigs:
+        stats = await calc_rig_stats(rig)
+        total_mh += stats['mh']
+        total_power += stats['power']
+        total_break_reduction = max(total_break_reduction, stats['break_reduction'])
+
+    elec_rate = float(await get_setting("mining_electricity_rate", "1"))
+    elec_cost = (total_power / 10) * elec_rate
+    rate = await get_ezhcoin_rate()
+
+    # Примерная доходность в час
+    coin_per_hour = total_mh * 0.05 * random.uniform(0.8, 1.2) if total_mh > 0 else 0
+    income_per_hour = coin_per_hour * rate
+
+    text = (
+        "⚡ **Майнинг — Панель управления**\n\n"
+        f"💰 Ежкоины: **{ms['ezhcoins']:.2f}**\n"
+        f"📊 Всего намайнено: {ms['total_mined']:.2f}\n\n"
+        f"🔧 Активных ригов: **{len(active_rigs)}/{len(rigs)}**\n"
+        f"📈 Общий хешрейт: **{total_mh} MH/s**\n"
+        f"⚡ Потребление: **{total_power}W**\n"
+        f"💸 Электричество: **{elec_cost:.0f} Ежидзиков/час**\n\n"
+        f"📊 Курс: 1 Ежкоин = {rate:.2f} Ежидзиков\n"
+        f"💰 Примерно: ~{coin_per_hour:.2f} Ежкоинов/час\n"
+        f"💵 ~{income_per_hour:.1f} Ежидзиков/час\n"
+    )
+
+    if ms['is_mining'] and active_rigs:
+        text += f"\n🟢 **Майнинг работает!**"
+    elif not active_rigs:
+        text += f"\n⚠️ Нет активных ригов!"
+    else:
+        text += f"\n🔴 **Майнинг остановлен**"
+
+    buttons = []
+    if active_rigs:
+        if ms['is_mining']:
+            buttons.append([InlineKeyboardButton(text="⏹ Остановить всё", callback_data="mine_stop_all", style=ButtonStyle.DANGER)])
+        else:
+            buttons.append([InlineKeyboardButton(text="▶️ Запустить всё", callback_data="mine_start_all", style=ButtonStyle.SUCCESS)])
+    buttons.append([InlineKeyboardButton(text="Назад ◀️◀️◀️", callback_data="mining")])
+    await safe_edit_text(callback.message, text, reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons), parse_mode="Markdown")
+
+
+@router.callback_query(F.data == "mine_start_all")
+async def mining_start_all(callback: CallbackQuery):
+    user_id = callback.from_user.id
+    await ensure_mining_state(user_id)
+    async with aiosqlite.connect(DB_NAME) as db:
+        await db.execute("UPDATE mining_rigs SET is_active = 1 WHERE user_id = ?", (user_id,))
+        await db.execute("UPDATE mining_state SET is_mining = 1 WHERE user_id = ?", (user_id,))
+        await db.commit()
+    await callback.answer("▶️ Все риги запущены!", show_alert=False)
+    await mining_dashboard(callback)
+
+
+@router.callback_query(F.data == "mine_stop_all")
+async def mining_stop_all(callback: CallbackQuery):
+    user_id = callback.from_user.id
+    async with aiosqlite.connect(DB_NAME) as db:
+        await db.execute("UPDATE mining_rigs SET is_active = 0 WHERE user_id = ?", (user_id,))
+        await db.execute("UPDATE mining_state SET is_mining = 0 WHERE user_id = ?", (user_id,))
+        await db.commit()
+    await callback.answer("⏹ Все риги остановлены!", show_alert=False)
+    await mining_dashboard(callback)
+
+
+# --- ОБМЕН ЕЖКОИНОВ ---
+@router.callback_query(F.data == "mining_exchange")
+async def mining_exchange_menu(callback: CallbackQuery, state: FSMContext):
+    await state.clear()
+    user_id = callback.from_user.id
+    await ensure_mining_state(user_id)
+    ms = await get_mining_state(user_id)
+    rate = await get_ezhcoin_rate()
+    diamond_rate = rate / 135  # 45 Ежидзиков = 1 Кожа, 3 Кожи = 1 Алмаз → 135 Ежидзиков ≈ 1 Алмаз
+
+    text = (
+        "💱 **Обмен Ежкоинов**\n\n"
+        f"💰 У тебя: **{ms['ezhcoins']:.2f}** Ежкоинов\n\n"
+        f"📊 Текущие курсы (с учётом комиссии 10%):\n"
+        f"  • 1 Ежкоин → {rate * 0.9:.2f} Ежидзиков\n"
+        f"  • 1 Ежкоин → {diamond_rate * 0.9:.4f} Алмазов\n\n"
+        f"⚠️ Комиссия 10% при обмене"
+    )
+
+    buttons = []
+    if ms['ezhcoins'] >= 1:
+        buttons.append([InlineKeyboardButton(
+            text=f"💰 Обменять на Ежидзики",
+            callback_data="mex_balance"
+        )])
+        buttons.append([InlineKeyboardButton(
+            text=f"💎 Обменять на Алмазы",
+            callback_data="mex_diamonds"
+        )])
+    else:
+        text += "\n\n📭 Недостаточно Ежкоинов (минимум 1)"
+
+    buttons.append([InlineKeyboardButton(text="Назад ◀️◀️◀️", callback_data="mining")])
+    await safe_edit_text(callback.message, text, reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons), parse_mode="Markdown")
+
+
+@router.callback_query(F.data.startswith("mex_"))
+async def mining_exchange_action(callback: CallbackQuery, state: FSMContext):
+    """Начало обмена — запрос количества."""
+    currency = callback.data.replace("mex_", "")
+    await state.update_data(exchange_currency=currency)
+    await state.set_state(MiningStates.waiting_exchange_amount)
+    
+    curr_label = "Ежидзики" if currency == "balance" else "Алмазы"
+    await safe_edit_text(
+        callback.message,
+        f"💱 **Обмен на {curr_label}**\n\nВведи количество Ежкоинов для обмена:",
+        reply_markup=back_button("mining_exchange"),
+        parse_mode="Markdown"
+    )
+
+
+@router.message(MiningStates.waiting_exchange_amount)
+async def mining_exchange_process(message: Message, state: FSMContext):
+    try:
+        amount = float(message.text.replace(",", "."))
+        if amount <= 0:
+            raise ValueError()
+    except ValueError:
+        await message.answer("❌ Введи положительное число!")
+        return
+
+    data = await state.get_data()
+    await state.clear()
+    currency = data.get('exchange_currency', 'balance')
+    user_id = message.from_user.id
+
+    ms = await get_mining_state(user_id)
+    if ms['ezhcoins'] < amount:
+        await message.answer(f"❌ У тебя только {ms['ezhcoins']:.2f} Ежкоинов!")
+        return
+
+    rate = await get_ezhcoin_rate()
+    commission = amount * 0.10
+    net = amount - commission
+
+    if currency == 'balance':
+        reward = round(net * rate)
+        if reward <= 0:
+            await message.answer("❌ Слишком маленькая сумма!")
+            return
+        async with aiosqlite.connect(DB_NAME) as db:
+            await db.execute("UPDATE mining_state SET ezhcoins = ezhcoins - ?, total_mined = total_mined WHERE user_id = ?", (amount, user_id))
+            await db.execute("UPDATE users SET balance = balance + ? WHERE user_id = ?", (reward, user_id))
+            await db.commit()
+        await message.answer(f"✅ Обменяно {amount:.2f} Ежкоинов → {reward} Ежидзиков👍\n📉 Комиссия: {commission:.2f}")
+    elif currency == 'diamonds':
+        diamond_rate = rate / 135
+        reward = round(net * diamond_rate)
+        if reward <= 0:
+            await message.answer("❌ Слишком маленькая сумма для алмазов!")
+            return
+        async with aiosqlite.connect(DB_NAME) as db:
+            await db.execute("UPDATE mining_state SET ezhcoins = ezhcoins - ?, total_mined = total_mined WHERE user_id = ?", (amount, user_id))
+            await db.execute("UPDATE users SET diamonds = diamonds + ? WHERE user_id = ?", (reward, user_id))
+            await db.commit()
+        await message.answer(f"✅ Обменяно {amount:.2f} Ежкоинов → {reward} 💎 Алмазов\n📉 Комиссия: {commission:.2f}")
 
 
 # --- STUB: ИИ-ЕЖ ---
@@ -8392,6 +9311,95 @@ async def ant_income_loop():
             print(f"Ошибка начисления муравьёв: {e}")
         await asyncio.sleep(3600)
 
+
+async def mining_loop():
+    """Фоновая задача майнинга — раз в час."""
+    while True:
+        try:
+            elec_rate = float(await get_setting("mining_electricity_rate", "1"))
+            async with aiosqlite.connect(DB_NAME) as db:
+                db.row_factory = aiosqlite.Row
+                # Получаем всех майнеров
+                async with db.execute("SELECT * FROM mining_state WHERE is_mining = 1") as cursor:
+                    miners = await cursor.fetchall()
+
+                for miner in miners:
+                    user_id = miner['user_id']
+                    # Получаем активные риги
+                    async with db.execute("SELECT * FROM mining_rigs WHERE user_id = ? AND is_active = 1", (user_id,)) as cursor:
+                        rigs = await cursor.fetchall()
+
+                    if not rigs:
+                        continue
+
+                    total_mh = 0
+                    total_power = 0
+                    max_break_reduction = 0
+
+                    for rig in rigs:
+                        # GPU хешрейт и потребление
+                        async with db.execute("SELECT mh_rate, power_w FROM mining_components WHERE id = ?", (rig['gpu_id'],)) as cursor:
+                            gpu = await cursor.fetchone()
+                        if gpu:
+                            total_mh += gpu['mh_rate']
+                            total_power += gpu['power_w']
+
+                        # Охлаждение
+                        if rig['cooling_id']:
+                            async with db.execute("SELECT break_reduction FROM mining_components WHERE id = ?", (rig['cooling_id'],)) as cursor:
+                                cool = await cursor.fetchone()
+                            if cool:
+                                max_break_reduction = max(max_break_reduction, cool['break_reduction'])
+
+                    # Электричество
+                    elec_cost = int((total_power / 10) * elec_rate)
+                    if elec_cost <= 0:
+                        elec_cost = 1
+
+                    # Проверяем баланс на электричество
+                    async with db.execute("SELECT balance FROM users WHERE user_id = ?", (user_id,)) as cursor:
+                        user = await cursor.fetchone()
+                    if not user or user['balance'] < elec_cost:
+                        # Не хватает на электричество — останавливаем майнинг
+                        await db.execute("UPDATE mining_state SET is_mining = 0 WHERE user_id = ?", (user_id,))
+                        await db.execute("UPDATE mining_rigs SET is_active = 0 WHERE user_id = ?", (user_id,))
+                        continue
+
+                    # Списываем электричество
+                    await db.execute("UPDATE users SET balance = balance - ? WHERE user_id = ?", (elec_cost, user_id))
+
+                    # Рассчитываем добычу
+                    coins_mined = total_mh * 0.05 * random.uniform(0.8, 1.2)
+
+                    # Поломки (5% базовый шанс за цикл, снижается охлаждением)
+                    break_chance = 0.05 * (1 - max_break_reduction)
+                    broken_msg = ""
+                    if random.random() < break_chance:
+                        # Случайный активный риг ломается
+                        broken_rig = random.choice(rigs)
+                        # Отмечаем видеокарту как сломанную в риге
+                        await db.execute("UPDATE mining_rigs SET is_active = 0 WHERE id = ?", (broken_rig['id'],))
+                        # Добавляем сломанную единицу в инвентарь
+                        await db.execute('''
+                            INSERT INTO mining_inventory (user_id, component_id, quantity, is_broken)
+                            VALUES (?, ?, 1, 1)
+                            ON CONFLICT(user_id, component_id) DO UPDATE SET is_broken = is_broken + 1
+                        ''', (user_id, broken_rig['gpu_id']))
+                        broken_msg = " 💥 Поломка!"
+
+                    # Начисляем Ежкоины
+                    await db.execute(
+                        "UPDATE mining_state SET ezhcoins = ezhcoins + ?, total_mined = total_mined + ?, last_mine = ? WHERE user_id = ?",
+                        (coins_mined, coins_mined, datetime.now().strftime("%Y-%m-%d %H:%M:%S"), user_id)
+                    )
+
+                await db.commit()
+
+        except Exception as e:
+            print(f"Ошибка майнинг-цикла: {e}")
+        await asyncio.sleep(3600)
+
+
 async def hunger_loop():
     # Реализация механики выживания v3.8
     # Еж умирает за 3 дня (72 часа) = 100% сытости.
@@ -8484,6 +9492,7 @@ async def main():
         
         # Start background tasks
         asyncio.create_task(ant_income_loop())
+        asyncio.create_task(mining_loop())
         asyncio.create_task(hunger_loop())
         
         print("=" * 50)
