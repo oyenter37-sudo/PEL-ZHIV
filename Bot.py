@@ -2183,7 +2183,7 @@ async def cmd_start(message: Message, command: CommandObject, state: FSMContext)
         
         if args:
             if args.startswith("promo_"):
-                promo_to_activate = args.replace("promo_", "")
+                promo_to_activate = args.replace("promo_", "").upper()
             else:
                 try:
                     referrer_id = int(args)
@@ -7344,15 +7344,15 @@ async def support_inline_info(callback: CallbackQuery):
     if not await check_access(bot, callback.from_user.id, callback):
         return
     
-    bot_me = await bot.get_me()
+    bot_username = await _get_bot_username()
     text = (
         "ℹ️ **Информация об Inline режиме**\n\n"
         "Вы можете делиться промокодами через inline-режим бота!\n\n"
-        f"1. Введите в любом чате: `@{bot_me.username} pr CODE`\n"
+        f"1. Введите в любом чате: `@{bot_username} pr CODE`\n"
         "(где CODE — код промокода)\n"
         "2. Появится кнопка **👍 Нажми СЮДА!**\n"
         "3. Отправьте сообщение, и любой пользователь сможет активировать промокод, нажав **🔥 Забрать**.\n\n"
-        "💡 Также можно просто ввести `@{bot_me.username}` — появится подсказка."
+        "💡 Также можно просто ввести `@{bot_username}` — появится подсказка."
     )
     await safe_edit_text(callback.message, text, reply_markup=back_button("support"))
 
@@ -9867,10 +9867,22 @@ async def process_promocode(message: Message, user_id: int, code: str, silent_no
 # 🎟 INLINE QUERY
 # =====================================
 
+# Кеш username бота (чтобы не дёргать get_me() при каждом inline-запросе)
+_bot_username_cache: str | None = None
+
+async def _get_bot_username() -> str:
+    global _bot_username_cache
+    if _bot_username_cache is None:
+        me = await bot.get_me()
+        _bot_username_cache = me.username
+    return _bot_username_cache
+
+
 @router.inline_query()
 async def inline_query_handler(query: InlineQuery):
     text = query.query.strip()
     results = []
+    bot_username = await _get_bot_username()
     
     # Режим "pr CODE"
     if text.lower().startswith("pr "):
@@ -9885,26 +9897,38 @@ async def inline_query_handler(query: InlineQuery):
                 type_names = {"balance": "ежидзиков👍", "ants": "муравьёв🐜", "color": "цвет🎨"}
                 curr_name = type_names.get(promo['reward_type'], promo['reward_type'])
                 
-                # Deep linking parameter for start
-                deep_link = f"promo_{code}"
-                bot_username = (await bot.get_me()).username
-                url = f"https://t.me/{bot_username}?start={deep_link}"
-                
                 description_text = (
                     f"🦔 Промокод в боте Говорящий Еж! 🦔\n"
                     f"⚡ Активаций осталось: {promo['uses_left']}\n"
                     f"🌟 Даёт: {promo['reward_value']} {curr_name}"
                 )
                 
-                results.append(InlineQueryResultArticle(
-                    id=f"promo_{code}",
-                    title="👍 Нажми СЮДА!",
-                    description=f"Промокод: {code} — {promo['reward_value']} {curr_name}",
-                    input_message_content=InputTextMessageContent(message_text=description_text),
-                    reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                        [InlineKeyboardButton(text="🔥 Забрать", url=url)]
-                    ])
-                ))
+                # Используем callback-кнопку вместо URL — надёжнее!
+                # URL-deeplink часто не срабатывает у уже зарегистрированных пользователей
+                callback_code = f"ipromo_{code}"
+                # Проверяем длину callback_data (лимит 64 байта)
+                if len(callback_code.encode('utf-8')) <= 64:
+                    results.append(InlineQueryResultArticle(
+                        id=f"promo_{code}",
+                        title="👍 Нажми СЮДА!",
+                        description=f"Промокод: {code} — {promo['reward_value']} {curr_name}",
+                        input_message_content=InputTextMessageContent(message_text=description_text),
+                        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                            [InlineKeyboardButton(text="🔥 Забрать", callback_data=callback_code)]
+                        ])
+                    ))
+                else:
+                    # Fallback: слишком длинный код — используем URL
+                    url = f"https://t.me/{bot_username}?start=promo_{code}"
+                    results.append(InlineQueryResultArticle(
+                        id=f"promo_{code}",
+                        title="👍 Нажми СЮДА!",
+                        description=f"Промокод: {code} — {promo['reward_value']} {curr_name}",
+                        input_message_content=InputTextMessageContent(message_text=description_text),
+                        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                            [InlineKeyboardButton(text="🔥 Забрать", url=url)]
+                        ])
+                    ))
             else:
                 # Промокод не найден — показываем сообщение
                 results.append(InlineQueryResultArticle(
@@ -9918,7 +9942,6 @@ async def inline_query_handler(query: InlineQuery):
     
     # Если пустой запрос
     if not text or not text.lower().startswith("pr "):
-        bot_username = (await bot.get_me()).username
         results.append(InlineQueryResultArticle(
             id="info",
             title="🎟 Поделиться промокодом",
@@ -9935,6 +9958,92 @@ async def inline_query_handler(query: InlineQuery):
         ))
     
     await query.answer(results, cache_time=5)
+
+
+@router.callback_query(F.data.startswith("ipromo_"))
+async def inline_promo_claim(callback: CallbackQuery):
+    """Обработка нажатия на '🔥 Забрать' в inline-сообщении с промокодом."""
+    code = callback.data.replace("ipromo_", "")
+    user_id = callback.from_user.id
+    username = callback.from_user.username or "Unknown"
+    
+    # Проверка бана
+    is_banned, ban_reason = await check_user_banned(user_id)
+    if is_banned:
+        await callback.answer("🚫 Вы заблокированы!", show_alert=True)
+        return
+    
+    # Авто-регистрация если пользователь новый
+    user = await get_user(user_id)
+    if not user:
+        await create_user(user_id, username)
+        user = await get_user(user_id)
+    
+    if not user:
+        await callback.answer("❌ Ошибка регистрации. Нажмите /start в боте и попробуйте снова.", show_alert=True)
+        return
+    
+    # Активация промокода
+    async with aiosqlite.connect(DB_NAME) as db:
+        db.row_factory = aiosqlite.Row
+        # Проверка: уже использовал?
+        async with db.execute("SELECT * FROM used_promocodes WHERE user_id = ? AND code = ?", (user_id, code)) as cursor:
+            if await cursor.fetchone():
+                await callback.answer("❌ Вы уже активировали этот промокод!", show_alert=True)
+                return
+        
+        # Проверка: промокод существует?
+        async with db.execute("SELECT * FROM promocodes WHERE code = ? AND uses_left > 0", (code,)) as cursor:
+            promo = await cursor.fetchone()
+        
+        if not promo:
+            await callback.answer("❌ Промокод не найден или все активации исчерпаны.", show_alert=True)
+            return
+        
+        # Выдача награды
+        reward_type = promo['reward_type']
+        reward_value = promo['reward_value']
+        
+        if reward_type == "balance":
+            await db.execute("UPDATE users SET balance = balance + ? WHERE user_id = ?", (int(reward_value), user_id))
+            reward_text = f"+{reward_value} Ежидзиков👍"
+        elif reward_type == "ants":
+            await db.execute("UPDATE users SET ants = ants + ? WHERE user_id = ?", (int(reward_value), user_id))
+            reward_text = f"+{reward_value} муравьёв🐜"
+        elif reward_type == "color":
+            await db.execute("UPDATE users SET hedgehog_color = ? WHERE user_id = ?", (reward_value, user_id))
+            reward_text = f"Новый цвет: {reward_value}"
+        else:
+            reward_text = "Награда получена!"
+        
+        await db.execute("INSERT INTO used_promocodes (user_id, code, used_at) VALUES (?, ?, ?)", (user_id, code, datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
+        await db.execute("UPDATE promocodes SET uses_left = uses_left - 1, total_uses = total_uses + 1 WHERE code = ?", (code,))
+        await db.commit()
+    
+    # Обновляем inline-кнопку: убираем «Забрать» и показываем «Забрано»
+    try:
+        await callback.message.edit_reply_markup(
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="✅ Забрано!", callback_data="ipromo_done")]
+            ])
+        )
+    except Exception:
+        pass  # сообщение уже изменено или слишком старое
+    
+    # Пробуем отправить личное сообщение с деталями
+    try:
+        bot_username = await _get_bot_username()
+        await bot.send_message(
+            user_id,
+            f"🎉 Промокод активирован!\n\n{reward_text}",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="🦔 Открыть бота", url=f"https://t.me/{bot_username}")]
+            ])
+        )
+    except Exception:
+        pass  # пользователь не начал бота — нельзя написать в ЛС
+    
+    await callback.answer(f"🎉 Промокод активирован! {reward_text}", show_alert=True)
 
 # =====================================
 # 🎰 ДОМАШНЕЕ КАЗИНО
@@ -10933,6 +11042,8 @@ async def main():
             return
         
         # Start background tasks
+        # Инициализируем кеш bot username
+        await _get_bot_username()
         asyncio.create_task(ant_income_loop())
         asyncio.create_task(mining_loop())
         asyncio.create_task(bank_interest_loop())
