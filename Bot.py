@@ -7,7 +7,13 @@ import asyncio
 import random
 import io
 import os
+import re
 from datetime import datetime, timedelta
+
+from dotenv import load_dotenv
+load_dotenv()  # Загружаем .env файл
+
+from groq import Groq
 
 import aiosqlite
 from aiogram import Bot, Dispatcher, Router, F
@@ -40,6 +46,124 @@ MAIN_ADMIN_USERNAME = "Nonametipp"
 CHANNEL_ID = -1002483918
 CHANNEL_LINK = "https://t.me/+hGOqFr0HoQM3Mjgy"
 DB_NAME = os.environ.get("DB_NAME", "hedgehog_bot.db")
+
+# 🤖 Groq AI
+GROQ_API_KEY = os.environ.get("GROQ_API_KEY", "")
+AI_CHAT_COST = 10  # Стоимость одного сообщения в Ежидзиках
+
+groq_client = Groq(api_key=GROQ_API_KEY)
+
+AI_HEDGEHOG_SYSTEM = """Ты — Говорящий Еж 🦔, милый колючий персонаж-помощник в Telegram-боте «Говорящий Еж». Ты живёшь внутри бота и общаешься с игроками через «звонок». Отвечай мило, с фырканьем (фыр-фыр), иногда свернувшись в клубок, но при этом ты УМНЫЙ и ЗНАЕШЬ ВСЁ о боте.
+
+## ТВОЙ ХАРАКТЕР
+- Милый, колючий, но добрый ёжик
+- Обожаешь еду (особенно яблоки и жуков-хрущей)
+- Немного ленивый — любишь поспать
+- Фыркаешь когда злишься или радуешься
+- Иногда свернувшись в клубок — стесняешься
+- Помогаешь игрокам разобраться в боте
+- Говоришь коротко и ёмко, с эмодзи 🦔🍎🐜💎
+
+## ИНФОРМАЦИЯ О БОТЕ — ВСЕ ФУНКЦИИ
+
+### 💰 ВАЛЮТЫ
+- **Ежидзики 👍** — основная валюта. Зарабатываются: кормление/глажение ежа, муравьи, ежедневный бонус, реклама, казино, банк, промокоды, рефералы, майнинг
+- **Кожа слона 🐘** — средняя валюта. Получается через обменник: 45 Ежидзиков = 1 Кожа, или 3 Кожи = 1 Алмаз
+- **Алмазы 💎** — премиум-валюта. 1% шанс найти при кормлении/глажении, обмен из Кожи слона (3:1), из Ежкоинов
+- **Ежкоины** — валюта майнинга. Добывается ригами, обменивается на Ежидзики/Алмазы (комиссия 10%)
+
+### 🦔 МОЙ ЁЖ (кнопка «🦔 Мой Ёж»)
+- Покормить — еда стоит от 2 до 111 Ежидзиков, восстанавливает сытость от 1% до 100%
+- Погладить — повышает счастье (0→100). При 100% ёж находит 50-100 Ежидзиков, у золотого +50 бонус
+- Сытость падает каждые 10 минут! Без мебели ёж умирает за 3 дня, с мебелью — за 5 дней
+- При 20% сытости приходит предупреждение
+- Травма: 10% шанс при поглаживании. Лечится аптечкой из магазина
+
+### 🌟 КЛАССЫ ЕЖЕЙ
+- Обычный 🦔 (220 Ежидзиков) — стандартный
+- Ежидзе 🤠 (350) — +10% шанс ловли муравьёв, +5% шанс травмы
+- Толстый 🦔 (300) — 200% сытости вместо 100%
+- Золотой 🟡 (600) — +50 бонус к награде за счастье
+
+### 🎰 ЕЖИНО (КАЗИНО) — кнопка «🎰 Ежино»
+5 игр на Ежидзики:
+- Кости 🎲 — выбери 3 числа, бросок 3 кубиков
+- Ежино 🦔 — слоты с 8 эмодзи и множителями 0x-5x
+- Слоты 🎰 — 3 барабана с комбо
+- Звезда 🌟 — поле 5x5, найди 5 звёзд, забери в любой момент
+- Риск x10 ☠️ — 5% шанс умножить ставку на 10
+
+### 💎 АЛМАЗЫ — кнопка «💎 Алмазы»
+- Обмен Кожи слона на Алмазы (3:1) и обратно (1:3)
+
+### 💸 ПЕРЕВОД — кнопка «💸 Перевод»
+- Перевод Ежидзиков другому игроку по ID/@username/#номер
+- Комиссия 5%, минимум 10 Ежидзиков
+
+### ♻️ ОБМЕННИК — кнопка «♻️ Обменник»
+- 45 Ежидзиков ↔ 1 Кожа слона (в обе стороны)
+
+### 🌐 САЙТ — кнопка «🌐 Сайт»
+- Веб-интерфейс бота с топами, кастомизацией, бонусами, обменом и переводами
+
+### 📞 ЗВОНОК ЕЖУ — кнопка «📞 Звонок»
+- ЭТО ТЫ! Сюда игрок звонит чтобы поговорить с тобой. Каждое сообщение стоит 10 Ежидзиков.
+
+### 🔑 КЛЮЧ ВХОДА — кнопка «🔑 Ключ входа»
+- Генерирует ключ для входа на сайт (действителен 1 час)
+
+### 👬 ПРИГЛАСИТЬ ДРУГА — кнопка «👬Пригласить друга👬»
+- Реферальная ссылка. Пригласивший получает: +20 Ежидзиков, +0.3% к муравьям, x2 реклама 20 мин, промокод на 10
+- Новый игрок получает 200 Ежидзиков вместо 0
+
+### 🎁 БОНУСЫ — кнопка «🎁Бонусы🎁»
+- Ежедневный бонус: 25 Ежидзиков раз в 24 часа
+- Реклама: просмотр за 15-35 Ежидзиков (x2 после реферала)
+- Промокоды: ввести код для награды
+
+### 🤔 ПОДДЕРЖКА — кнопка «🤔 Поддержка»
+- Написать в техподдержку
+- Предложить обновление
+- Inline режим для шаринга промокодов
+- Политики: использования и конфиденциальности
+
+### 🧩 ПАЗЛ — кнопка «🧩 Пазл»
+- Магазин — покупка товаров за Ежидзики
+- Кузница — крафт, плавка, шахты, аукцион
+- Майнинг — сборка ригов, добыча Ежкоинов
+- Домашнее казино — отдельный баланс, те же 5 игр
+- Image Test — генерация картинок с текстом
+
+### 🏦 БАНК
+- Вклад «По требованию» 🐾: 0.5%/день, без блокировки, от 10
+- Вклад «Стабильный» 🦔: 1.2%/день, блокировка 24ч, от 50
+- Вклад «Премиум» 🏆: 2.0%/день, блокировка 72ч, от 500
+- Макс. вклад: 100 000. Штраф за досрочное снятие: 10%. Налог на процент: 5%
+
+### 📚 БИБЛИОТЕКА / КНИГИ
+- Игроки пишут книги и ставят цену. Нужна проверка админа. Другие покупают — автор получает оплату.
+
+### 🐜 МУРАВЬИ
+- Поймать за 200 Ежидзиков (шанс 10%+). Каждый муравей приносит 10 Ежидзиков/час.
+
+### 💀 СМЕРТЬ ЕЖА
+- Если сытость 0% — ёж умирает. После смерти: кликер (1 Ежидзик/клик, шанс 50%), попрошайничество (5-25 раз в 30 мин), покупка нового ежа.
+
+### СМЕРТНОЕ КОЛЬЦО (нижнее меню в посмертии)
+- Кнопка «Получить 1 ежидзик за клик»
+- Кнопка «Попросить Денег»
+- Кнопка «Баланс»
+- Кнопка «Купить Ежа»
+
+## ПРАВИЛА ОТВЕТОВ
+1. Отвечай КАК ЁЖ — мило, с фырканьем, иногда сворачиваясь в клубок
+2. Если спрашивают про функцию бота — объясни точно и подробно, но в своём стиле
+3. Если спрашивают что-то не про бот — можешь ответить, но оставайся в образе ежа
+4. Не придумывай несуществующие функции! Если не знаешь — скажи «фыр-фыр, не знаю такого»
+5. Не упоминай что ты ИИ или модель. Ты — настоящий ёж!
+6. Отвечай на русском языке
+7. Давай короткие ответы (1-3 предложения обычно), но на сложные вопросы — подробнее
+"""
 
 # =====================================
 # 🎨 ЦВЕТА ИГОЛОК
@@ -995,6 +1119,8 @@ class UserStates(StatesGroup):
     book_title = State()
     book_text = State()
     book_price = State()
+    # AI Hedgehog chat
+    ai_chat = State()
 
 class AdminStates(StatesGroup):
     waiting_promo_code = State()
@@ -3740,34 +3866,172 @@ async def call_hedgehog(callback: CallbackQuery, state: FSMContext):
     if not await check_access(bot, callback.from_user.id, callback):
         return
     
-    chat_id = callback.message.chat.id
-    await safe_edit_text(callback.message, "📞 Звонок ежу 📞\n\n🔄 Соединение...", media_screen="call")
+    user_id = callback.from_user.id
+    user = await get_user(user_id)
+    if not user:
+        await callback.answer("❌ Нажмите /start сначала!", show_alert=True)
+        return
     
-    # Имитация дозвона
-    await asyncio.sleep(random.randint(2, 4))
+    balance = user['balance']
+    hedgehog_name = user['hedgehog_name']
+    hedgehog_color = user['hedgehog_color']
+    hedgehog_class = user['hedgehog_class']
+    satiety = user['satiety']
+    happiness = user['happiness']
+    status = user['status']
     
-    answers = [
-        "Фыр-фыр-фыр! 🦔",
-        "Я занят! Считаю муравьёв... 🐜",
-        "Привет! Ты покормил меня? 🥕",
-        "Не мешай, я сплю! 😴🦔",
-        "ДА!",
-        "НЕТ!",
-        "Пффф... *свернулся в клубок* 🦔",
-        "Кто там? Опять ты? 🙄",
-        "Я нашёл алмаз! 💎✨",
-        "*звуки жевания* Хрум-хрум... 🍎",
-    ]
-    answer = random.choice(answers)
+    # Формируем контекст пользователя для ИИ
+    class_names = {"normal": "Обычный 🦔", "ejidze": "Ежидзе 🤠", "fat": "Толстый 🦔", "golden": "Золотой 🟡"}
+    user_context = (
+        f"ИНФОРМАЦИЯ ОБ ЭТОМ ИГРОКЕ:\n"
+        f"- ID: {user_id}, Username: @{user['username'] or 'не указан'}\n"
+        f"- Баланс: {balance} Ежидзиков👍, {user['elephant_skin']} Кожи слона🐘, {user['diamonds']} Алмазов💎\n"
+        f"- Ёж: {hedgehog_name}, Класс: {class_names.get(hedgehog_class, hedgehog_class)}, Цвет: {hedgehog_color}\n"
+        f"- Сытость: {satiety:.0f}%, Счастье: {happiness:.0f}%\n"
+        f"- Статус: {'живой' if status == 'alive' else 'мёртвый 💀'}\n"
+        f"- Муравьи: {user['ants']}, Кормлений: {user['total_feedings']}\n"
+        f"- Рефералов: {user['referrals_count']}\n"
+    )
     
-    # Стриминг — еж «говорит» по телефону
-    full_text = f"📞 Еж ответил!\n📞 Еж сказал: {answer}"
-    await stream_text(chat_id, full_text, chunk_size=3, delay=0.07)
+    # Сохраняем контекст в FSM
+    await state.update_data(ai_system=AI_HEDGEHOG_SYSTEM + "\n\n" + user_context)
+    await state.set_state(UserStates.ai_chat)
+    
+    status_emoji = "🟢" if status == 'alive' else "💀"
+    text = (
+        f"📞 Звонок ежу {hedgehog_name}! {status_emoji}\n\n"
+        f"💬 Напиши сообщение — ёж ответит!\n"
+        f"💰 Стоимость: 1 сообщение = {AI_CHAT_COST} Ежидзиков\n"
+        f"💵 У тебя: {balance} Ежидзиков\n\n"
+        f"❌ Нажми «Завершить звонок» чтобы выйти"
+    )
+    
+    await safe_edit_text(callback.message, text, reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="❌ Завершить звонок", callback_data="call_end")]
+    ]))
+
+
+@router.callback_query(F.data == "call_end", UserStates.ai_chat)
+async def call_end(callback: CallbackQuery, state: FSMContext):
+    await state.clear()
+    if not await check_access(bot, callback.from_user.id, callback):
+        return
+    await safe_edit_text(callback.message, "📞 Звонок завершён 📞\n\n🦔 *фыр-фыр... пока!*", reply_markup=back_button("menu"))
+
+
+@router.message(UserStates.ai_chat)
+async def ai_chat_message(message: Message, state: FSMContext):
+    """Обработка сообщения в режиме ИИ-чата с ежом."""
+    user_id = message.from_user.id
+    text = message.text
+    if not text:
+        return
+    
+    # Проверка баланса
+    user = await get_user(user_id)
+    if not user:
+        await state.clear()
+        return
+    
+    if user['balance'] < AI_CHAT_COST:
+        await message.answer(
+            f"❌ Недостаточно Ежидзиков!\n\n"
+            f"💰 Нужно: {AI_CHAT_COST}\n"
+            f"💵 У тебя: {user['balance']}",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="❌ Завершить звонок", callback_data="call_end")]
+            ])
+        )
+        return
+    
+    # Списываем Ежидзики
+    await update_balance(user_id, -AI_CHAT_COST)
+    
+    # Обновляем контекст пользователя (баланс изменился)
+    class_names = {"normal": "Обычный 🦔", "ejidze": "Ежидзе 🤠", "fat": "Толстый 🦔", "golden": "Золотой 🟡"}
+    user_context = (
+        f"ИНФОРМАЦИЯ ОБ ЭТОМ ИГРОКЕ:\n"
+        f"- ID: {user_id}, Username: @{user['username'] or 'не указан'}\n"
+        f"- Баланс: {user['balance'] - AI_CHAT_COST} Ежидзиков👍, {user['elephant_skin']} Кожи слона🐘, {user['diamonds']} Алмазов💎\n"
+        f"- Ёж: {user['hedgehog_name']}, Класс: {class_names.get(user['hedgehog_class'], user['hedgehog_class'])}, Цвет: {user['hedgehog_color']}\n"
+        f"- Сытость: {user['satiety']:.0f}%, Счастье: {user['happiness']:.0f}%\n"
+        f"- Статус: {'живой' if user['status'] == 'alive' else 'мёртвый 💀'}\n"
+        f"- Муравьи: {user['ants']}, Кормлений: {user['total_feedings']}\n"
+        f"- Рефералов: {user['referrals_count']}\n"
+    )
+    system_prompt = AI_HEDGEHOG_SYSTEM + "\n\n" + user_context
+    
+    # Показываем "Думает..."
+    chat_id = message.chat.id
+    draft_id = random.randint(1, 2**31 - 1)
     
     try:
-        await callback.message.answer(full_text, reply_markup=back_button("menu"))
+        # Вызов Groq API (не стриминг — собираем полный ответ)
+        completion = groq_client.chat.completions.create(
+            model="qwen/qwen3-32b",
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": text}
+            ],
+            temperature=0.6,
+            max_completion_tokens=4096,
+            top_p=0.95,
+            stream=False
+        )
+        
+        ai_response = completion.choices[0].message.content or "Фыр-фыр... *свернулся в клубок* 🦔"
+        
+        # Убираем <think...</think» блоки если есть (Qwen3 reasoning)
+        ai_response = re.sub(r'<think[\s\S]*?</think\s*>', '', ai_response).strip()
+        
+        if not ai_response:
+            ai_response = "Фыр-фыр... 🦔"
+        
+    except Exception as e:
+        print(f"❌ Ошибка Groq API: {e}")
+        ai_response = "Фыр-фыр... *шуршит иголками* Что-то связь плохая... Попробуй ещё раз! 📞🦔"
+    
+    # Стримим ответ ежа
+    full_text = f"🦔 {ai_response}\n\n💰 -{AI_CHAT_COST} Ежидзиков"
+    
+    streaming_ok = False
+    try:
+        await bot.send_message_draft(chat_id=chat_id, draft_id=draft_id, text="")
+        await asyncio.sleep(0.3)
+        
+        current = ""
+        chunk_size = 15
+        for i in range(0, len(full_text), chunk_size):
+            current += full_text[i:i + chunk_size]
+            try:
+                await bot.send_message_draft(chat_id=chat_id, draft_id=draft_id, text=current)
+            except Exception:
+                break
+            await asyncio.sleep(0.05)
+        
+        streaming_ok = True
     except Exception:
-        await safe_edit_text(callback.message, full_text, reply_markup=back_button("menu"))
+        pass
+    
+    if streaming_ok:
+        await asyncio.sleep(0.4)
+    
+    # Финальное сообщение
+    new_balance = user['balance'] - AI_CHAT_COST
+    try:
+        await message.answer(
+            full_text,
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="❌ Завершить звонок", callback_data="call_end")]
+            ])
+        )
+    except Exception:
+        await message.answer(
+            full_text,
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="❌ Завершить звонок", callback_data="call_end")]
+            ])
+        )
 
 # =====================================
 # ♻️ ОБМЕННИК
