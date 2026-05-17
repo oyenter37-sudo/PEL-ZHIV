@@ -1074,8 +1074,7 @@ def main_reply_keyboard(is_admin: bool = False, is_fake_admin: bool = False):
     buttons = [
         [KeyboardButton(text="🏠 Меню", style=ButtonStyle.PRIMARY)],
         [KeyboardButton(text="🦔 Мой Ёж"), KeyboardButton(text="🌟 Финансы")],
-        [KeyboardButton(text="🤔 Поддержка"), KeyboardButton(text="🎰 Ежино")],
-        [KeyboardButton(text="🧩 Пазл", style=ButtonStyle.PRIMARY)]
+        [KeyboardButton(text="🎰 Ежино")]
     ]
     if is_admin or is_fake_admin:
         buttons.append([KeyboardButton(text="🛠 Панель", style=ButtonStyle.DANGER)])
@@ -1114,7 +1113,7 @@ def main_menu_keyboard(is_admin: bool = False):
         ],
         [
              InlineKeyboardButton(text="💎 Алмазы", callback_data="diamond_menu"),
-             InlineKeyboardButton(text="🧩 Пазл", callback_data="puzzle")
+             InlineKeyboardButton(text="🤔 Поддержка", callback_data="support")
         ],
         [
             InlineKeyboardButton(text="💸 Перевод", callback_data="transfer_menu"),
@@ -1123,6 +1122,7 @@ def main_menu_keyboard(is_admin: bool = False):
         [
             InlineKeyboardButton(text="🌐 Сайт", callback_data="website"),
              InlineKeyboardButton(text="📞 Звонок", callback_data="call"),
+             InlineKeyboardButton(text="🧩 Пазл", callback_data="puzzle")
         ],
         [
             InlineKeyboardButton(text="🔑 Ключ входа", callback_data="web_key", style=ButtonStyle.PRIMARY),
