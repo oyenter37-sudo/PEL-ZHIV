@@ -4007,14 +4007,16 @@ async def website_info(callback: CallbackQuery):
 
 @router.callback_query(F.data == "web_key")
 async def web_key_generate(callback: CallbackQuery):
-    from web import generate_web_key
+    from web import generate_web_key, PUBLIC_URL
     user_id = callback.from_user.id
     key = await generate_web_key(user_id)
+    url_text = f"\n🔗 Сайт: {PUBLIC_URL}" if PUBLIC_URL else "\n🔗 Сайт: (загружается...)"
     text = (
         "🔑 **Ключ входа на сайт**\n\n"
         f"```\n{key}\n```\n\n"
         "⏱ Действителен 1 час\n"
-        "🔗 Введите его на сайте для входа в личный кабинет\n\n"
+        "🔗 Введите его на сайте для входа в личный кабинет\n"
+        f"{url_text}\n\n"
         "⚠️ Не передавайте ключ другим!"
     )
     kb = InlineKeyboardMarkup(inline_keyboard=[

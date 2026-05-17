@@ -7,12 +7,18 @@
 import os
 import json
 import secrets
+import asyncio
+import subprocess
+import re
 from datetime import datetime, timedelta
 
 import aiosqlite
 from aiohttp import web
 
 DB_NAME = os.environ.get("DB_NAME", "hedgehog_bot.db")
+
+# Глобальная переменная с публичным URL
+PUBLIC_URL = None
 
 # =====================================
 # 🎨 HTML / CSS ШАБЛОНЫ
@@ -681,6 +687,7 @@ async def handle_finances(request):
 # =====================================
 
 async def start_web_server():
+    global PUBLIC_URL
     app = web.Application()
     app.router.add_get('/', handle_index)
     app.router.add_get('/login', handle_login)
@@ -694,3 +701,39 @@ async def start_web_server():
     site = web.TCPSite(runner, '0.0.0.0', 8080)
     await site.start()
     print("🌐 Web-сервер запущен на порту 8080")
+
+    # Запускаем cloudflared туннель
+    await _start_cloudflare_tunnel()
+
+
+async def _start_cloudflare_tunnel():
+    """Запускает cloudflared quick tunnel для публичного доступа."""
+    global PUBLIC_URL
+    cloudflared_path = os.path.expanduser("~/.local/bin/cloudflared")
+    if not os.path.exists(cloudflared_path):
+        print("⚠️ cloudflared не найден, туннель не запущен")
+        return
+
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            cloudflared_path, "tunnel", "--url", "http://localhost:8080",
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        # Читаем stderr чтобы вытащить URL
+        url_found = None
+        for _ in range(50):  # ждём до 25 секунд
+            line = await asyncio.wait_for(proc.stderr.readline(), timeout=30)
+            line = line.decode("utf-8", errors="ignore")
+            match = re.search(r'https://[a-z0-9\-]+\.trycloudflare\.com', line)
+            if match:
+                url_found = match.group(0)
+                break
+
+        if url_found:
+            PUBLIC_URL = url_found
+            print(f"🌐 Публичный URL: {PUBLIC_URL}")
+        else:
+            print("⚠️ Не удалось получить URL туннеля")
+    except Exception as e:
+        print(f"⚠️ Ошибка запуска cloudflared: {e}")
