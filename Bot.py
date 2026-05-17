@@ -4429,10 +4429,11 @@ async def ai_chat_message(message: Message, state: FSMContext):
                 await bot.send_chat_action(chat_id=message.chat.id, action=ChatAction.TYPING)
             except Exception:
                 pass
-            try:
-                await asyncio.wait_for(typing_stop.wait(), timeout=4.0)
-            except asyncio.TimeoutError:
-                continue
+            # Ждём 4 секунды, проверяя флаг остановки каждые 0.5с
+            for _ in range(8):
+                if typing_stop.is_set():
+                    return
+                await asyncio.sleep(0.5)
     
     typing_task = asyncio.create_task(typing_loop())
     
