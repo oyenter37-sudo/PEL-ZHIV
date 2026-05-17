@@ -20,9 +20,6 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY Bot.py .
 COPY web.py .
 
-# Копируем переменные окружения
-COPY .env .
-
 # Копируем базу данных
 COPY hedgehog_bot.db .
 

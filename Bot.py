@@ -10,9 +10,6 @@ import os
 import re
 from datetime import datetime, timedelta
 
-from dotenv import load_dotenv
-load_dotenv()  # Загружаем .env файл
-
 from groq import Groq
 
 import aiosqlite
