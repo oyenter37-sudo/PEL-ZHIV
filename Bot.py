@@ -634,6 +634,35 @@ async def ai_tool_action_play_ejino(user_id: int, bet: int) -> str:
 
 # Маппинг имен инструментов на функции
 AI_TOOL_FUNCTIONS = {
+
+# Описания инструментов для промежуточных сообщений
+TOOL_ACTION_LABELS = {
+    # Информационные
+    "get_balance": "Проверяю баланс",
+    "get_hedgehog_info": "Осматриваю ежа",
+    "get_ants_info": "Считаю муравьёв",
+    "get_bank_info": "Проверяю вклады",
+    "get_inventory": "Роюсь в инвентаре",
+    "get_mining_info": "Проверяю майнинг",
+    "get_referral_info": "Смотрю рефералов",
+    "get_section_details": "Читаю справку",
+    # Действия — обмен
+    "action_exchange_to_skin": "Обмениваю Ежидзики на Кожу слона",
+    "action_exchange_to_balance": "Обмениваю Кожу слона на Ежидзики",
+    "action_exchange_skin_to_diamonds": "Обмениваю Кожу на Алмазы",
+    "action_exchange_diamonds_to_skin": "Обмениваю Алмазы на Кожу",
+    # Действия — перевод
+    "action_transfer": "Отправляю перевод",
+    # Действия — бонусы
+    "action_claim_daily_bonus": "Забираю ежедневный бонус",
+    # Действия — муравьи
+    "action_catch_ant": "Ловлю муравья",
+    # Действия — казино
+    "action_play_ejino": "Кручу Ежино",
+}
+
+# Маппинг имен инструментов на функции (продолжение)
+AI_TOOL_FUNCTIONS = {
     # Информационные
     "get_balance": ai_tool_get_balance,
     "get_hedgehog_info": ai_tool_get_hedgehog_info,
@@ -4509,6 +4538,16 @@ async def ai_chat_message(message: Message, state: FSMContext):
                     try:
                         if tool_call.function.arguments:
                             func_args = json.loads(tool_call.function.arguments)
+                    except Exception:
+                        pass
+                    
+                    # Показываем промежуточное сообщение «Вызываю инструмент...»
+                    tool_label = TOOL_ACTION_LABELS.get(func_name, func_name)
+                    try:
+                        await bot.send_message(
+                            chat_id=message.chat.id,
+                            text=f"🔧 {tool_label}..."
+                        )
                     except Exception:
                         pass
                     
