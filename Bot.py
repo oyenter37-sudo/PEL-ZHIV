@@ -8,6 +8,7 @@ import random
 import io
 import os
 import re
+import json
 from datetime import datetime, timedelta
 
 from groq import Groq
@@ -47,6 +48,7 @@ DB_NAME = os.environ.get("DB_NAME", "hedgehog_bot.db")
 # 🤖 Groq AI
 GROQ_API_KEY = os.environ.get("GROQ_API_KEY", "")
 AI_CHAT_COST = 10  # Стоимость одного сообщения в Ежидзиках
+AI_HISTORY_LIMIT = 3  # Запоминать последние N пар сообщений
 
 groq_client = Groq(api_key=GROQ_API_KEY)
 
@@ -54,34 +56,213 @@ AI_HEDGEHOG_SYSTEM = """Ты — Говорящий Еж 🦔, милый кол
 
 ХАРАКТЕР: милый, колючий, добрый, любишь яблоки и жуков, ленивый, фыркаешь, помогаешь игрокам. Говоришь коротко с эмодзи 🦔🍎🐜💎
 
-ВАЛЮТЫ: Ежидзики👍(основная), Кожа слона🐘(45 ЕЖ=1 КС, 3 КС=1 Алмаз), Алмазы💎(1% шанс при кормлении/глажении), Ежкоины(майнинг, обмен с комиссией 10%)
+У тебя есть ИНСТРУМЕНТЫ — вызывай их когда нужно узнать информацию! Не выдумывай данные, всегда используй инструменты.
 
-КНОПКИ МЕНЮ:
-- 🦔 Мой Ёж: Покормить(еда 2-111 ЕЖ, сытость 1-100%), Погладить(счастье→100%=50-100 ЕЖ), Сытость падает каждые 10мин, без мебели смерть за 3 дня, с мебелью 5 дней. Травма 10% при поглаживании, лечится аптечкой.
-- 🌟 Финансы: баланс, магазин, инвентарь
-- 🎰 Ежино: 5 игр(Кости🎲, Ежино🦔, Слоты🎰, Звезда🌟, Рискx10☠️)
-- 💎 Алмазы: обмен КС↔Алмазы(3:1 / 1:3)
-- 💸 Перевод: другому игроку, комиссия 5%
-- ♻️ Обменник: 45 ЕЖ↔1 КС
-- 🌐 Сайт: веб-интерфейс
-- 📞 Звонок: ЭТО ТЫ! 1 сообщение = 10 ЕЖ
-- 🔑 Ключ входа: для сайта, 1 час
-- 👬 Пригласить друга: +20 ЕЖ, +0.3% муравьи, x2 реклама 20мин, друг получает 200 ЕЖ
-- 🎁 Бонусы: ежедневный 25 ЕЖ, реклама 15-35 ЕЖ, промокоды
-- 🤔 Поддержка: техподдержка, предложения, inline промокоды
-- 🧩 Пазл: Магазин, Кузница(крафт/шахты/аукцион), Майнинг(риги/Ежкоины), Домашнее казино, Image Test
+ПРАВИЛА: 1) Отвечай как ёж — мило, с фырканьем 2) Про бота — используй инструменты и объясняй точно 3) Не про бота — можешь ответить в образе 4) Не придумывай функции! Не знаешь — «фыр-фыр, не знаю» 5) Ты настоящий ёж, не ИИ! 6) По-русски 7) Коротко, но на сложные — подробнее"""
 
-КЛАССЫ: Обычный🦔(220 ЕЖ), Ежидзе🤠(350, +10% муравьи), Толстый🦔(300, 200% сытость), Золотой🟡(600, +50 бонус счастье)
+# Определение инструментов для Groq function calling
+AI_TOOLS = [
+    {
+        "type": "function",
+        "function": {
+            "name": "get_balance",
+            "description": "Узнать баланс игрока: Ежидзики, Кожа слона, Алмазы, Ежкоины",
+            "parameters": {"type": "object", "properties": {}, "required": []}
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_hedgehog_info",
+            "description": "Узнать всё о еже: имя, класс, цвет, сытость, счастье, статус, травма",
+            "parameters": {"type": "object", "properties": {}, "required": []}
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_ants_info",
+            "description": "Узнать про муравьёв: количество, шанс ловли, доход в час",
+            "parameters": {"type": "object", "properties": {}, "required": []}
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_bank_info",
+            "description": "Узнать про банковские вклады игрока и условия",
+            "parameters": {"type": "object", "properties": {}, "required": []}
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_inventory",
+            "description": "Узнать что есть в инвентаре игрока",
+            "parameters": {"type": "object", "properties": {}, "required": []}
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_mining_info",
+            "description": "Узнать про майнинг: риги, Ежкоины, компоненты",
+            "parameters": {"type": "object", "properties": {}, "required": []}
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_referral_info",
+            "description": "Узнать про рефералов: количество, заработок, ссылка",
+            "parameters": {"type": "object", "properties": {}, "required": []}
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_section_details",
+            "description": "Узнать подробности о разделе бота. section: одно из [меню, ежа, финансы, казино, алмазы, перевод, обменник, сайт, звонок, ключ, друзья, бонусы, поддержка, пазл, магазин, кузница, майнинг, домашнее_казино, банк, книги, муравьи, смерть, классы, цвета, еда]",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "section": {
+                        "type": "string",
+                        "description": "Название раздела для подробного описания"
+                    }
+                },
+                "required": ["section"]
+            }
+        }
+    }
+]
 
-БАНК: По требованию🐾(0.5%/день), Стабильный🦔(1.2%/день, 24ч блок), Премиум🏆(2%/день, 72ч блок). Макс 100к, штраф 10%, налог 5%
+# Подробности о разделах бота
+SECTION_DETAILS = {
+    "меню": "Главное меню бота. Кнопки: Покормить🦔, Погладить🦔, Алмазы💎, Поддержка🤔, Перевод💸, Обменник♻️, Сайт🌐, Звонок📞, Пазл🧩, Ключ входа🔑, Пригласить друга👬, Бонусы🎁",
+    "ежа": "Мой Ёж — управление питомцем. Покормить: еда от 2 до 111 ЕЖ, сытость 1-100%. Погладить: счастье растёт, при 100% ёж находит 50-100 ЕЖ. Сытость падает каждые 10мин! Без мебели смерть за 3 дня, с мебелью 5 дней. При 20% — предупреждение. Травма 10% при поглаживании, лечится аптечкой из магазина.",
+    "финансы": "Баланс: Ежидзики👍, Кожа слона🐘, Алмазы💎. Магазин: покупка товаров. Инвентарь: ваши предметы.",
+    "казино": "Ежино — 5 игр на Ежидзики: Кости🎲 (3 числа, 3 кубика), Ежино🦔 (слоты 8 эмодзи, 0x-5x), Слоты🎰 (3 барабана), Звезда🌟 (поле 5x5, 5 звёзд), Рискx10☠️ (5% шанс x10)",
+    "алмазы": "Обмен Кожи слона на Алмазы: 3 КС = 1 Алмаз, 1 Алмаз = 3 КС",
+    "перевод": "Перевод Ежидзиков другому игроку по ID/@username/#номер. Комиссия 5%, минимум 10 Ежидзиков.",
+    "обменник": "45 Ежидзиков ↔ 1 Кожа слона (в обе стороны)",
+    "сайт": "Веб-интерфейс бота: топы, кастомизация ежа, ежедневный бонус, обменник, переводы",
+    "звонок": "ЭТО ТЫ! Игрок звонит ежу чтобы поговорить. 1 сообщение = 10 Ежидзиков.",
+    "ключ": "Генерирует ключ для входа на сайт. Действителен 1 час. Формат: pel_XXXXXXXX",
+    "друзья": "Реферальная система. Пригласивший: +20 ЕЖ, +0.3% к муравьям (макс 30%), x2 реклама 20мин, промокод на 10. Друг: 200 ЕЖ на старте вместо 0.",
+    "бонусы": "Ежедневный бонус: 25 ЕЖ раз в 24ч. Реклама: 15-35 ЕЖ за просмотр (x2 после реферала 20мин). Промокоды: ввести код для награды.",
+    "поддержка": "Написать в техподдержку, предложить обновление, inline промокоды (@bot pr КОД), политики использования и конфиденциальности.",
+    "пазл": "Дополнительные функции: Магазин, Кузница(крафт/шахты/аукцион), Майнинг(риги/Ежкоины), Домашнее казино, Image Test",
+    "магазин": "Покупка товаров за Ежидзики. Мебель (стул, стол, кровать и т.д.) снижает голод. Аптечка лечит травму. 19 товаров.",
+    "кузница": "Крафт: комбинируй предметы. Плавка: переплавляй в другие. Шахты: копай с шансом найти предмет. Аукцион: торгуй с игроками.",
+    "майнинг": "Сборка ригов из GPU+БП+Плата+Охлаждение. Добыча Ежкоинов. Обмен на ЕЖ/Алмазы (комиссия 10%). Поломка 5% за цикл. Электричество за ЕЖ. Макс 5 ригов. Компоненты: GT710→RTX4090.",
+    "домашнее_казино": "Покупка за 300 ЕЖ. Отдельный баланс (Ежедзуки). Те же 5 игр. Продать за 150 ЕЖ.",
+    "банк": "3 вклада: По требованию🐾(0.5%/день, без блокировки, от 10), Стабильный🦔(1.2%/день, 24ч блок, от 50), Премиум🏆(2%/день, 72ч блок, от 500). Макс 100к. Штраф 10% за досрочное снятие. Налог 5% на процент.",
+    "книги": "Игроки пишут книги с ценой. Админ проверяет. Другие покупают — автор получает оплату.",
+    "муравьи": "Поймать за 200 ЕЖ (шанс 10%+бонусы). Каждый муравей = 10 ЕЖ/час. Ежидзе-класс +10% шанс. Рефералы +0.3% каждый (макс 30%).",
+    "смерть": "Сытость 0% = смерть. После: кликер(1 ЕЖ/клик, шанс 50%), попрошайничество(5-25 ЕЖ раз в 30мин), купить нового ежа.",
+    "классы": "Обычный🦔(220 ЕЖ, стандарт), Ежидзе🤠(350 ЕЖ, +10% муравьи, +5% травма), Толстый🦔(300 ЕЖ, 200% сытость), Золотой🟡(600 ЕЖ, +50 бонус к награде счастья). Можно продать за 75%.",
+    "цвета": "10 цветов иголок по 100 ЕЖ: ⚫Чёрный, 🟤Коричневый, ⚪Белый, 🟠Оранжевый, 🟡Золотой, 🔵Синий, 🟣Фиолетовый, 🔴Красный, 🟢Зелёный, 🌈Радужный",
+    "еда": "9 видов еды: Тухлое яблоко(2 ЕЖ,+1%), Яблоко(5,+4%), Груша(6,+5%), Жук-хрущ(12,+10%), Молоко кота(30,+20%), Молоко(39,+25%), Хлеб(59,+40%), Капуста(70,+50%), Электрический робот(111,+100%)"
+}
 
-МУРАВЬИ: 200 ЕЖ за ловлю(шанс 10%+), 10 ЕЖ/час за муравья
 
-КНИГИ: игроки пишут, админ проверяет, другие покупают
+async def ai_tool_get_balance(user_id: int) -> str:
+    user = await get_user(user_id)
+    if not user:
+        return "Игрок не найден"
+    async with aiosqlite.connect(DB_NAME) as db:
+        async with db.execute("SELECT ezhcoins FROM mining_state WHERE user_id = ?", (user_id,)) as cursor:
+            row = await cursor.fetchone()
+            ezhcoins = row[0] if row else 0
+    return f"Баланс: {user['balance']} Ежидзиков👍, {user['elephant_skin']} Кожи слона🐘, {user['diamonds']} Алмазов💎, {ezhcoins:.1f} Ежкоинов"
 
-СМЕРТЬ: сытость 0%=смерть. После: кликер(1 ЕЖ/клик 50%), попрошайничество(5-25/30мин), купить нового ежа
 
-ПРАВИЛА: 1) Отвечай как ёж — мило, с фырканьем 2) Про бота — объясняй точно 3) Не про бота — можешь ответить в образе 4) Не придумывай функции! Не знаешь — «фыр-фыр, не знаю» 5) Ты настоящий ёж, не ИИ! 6) По-русски 7) Коротко, но на сложные — подробнее"""
+async def ai_tool_get_hedgehog_info(user_id: int) -> str:
+    user = await get_user(user_id)
+    if not user:
+        return "Игрок не найден"
+    class_names = {"normal": "Обычный 🦔", "ejidze": "Ежидзе 🤠", "fat": "Толстый 🦔", "golden": "Золотой 🟡"}
+    cls = class_names.get(user['hedgehog_class'], user['hedgehog_class'])
+    status = "живой 🟢" if user['status'] == 'alive' else "мёртвый 💀"
+    injured = "Да, нужна аптечка!" if user['is_injured'] else "Нет"
+    return (f"Имя: {user['hedgehog_name']}, Класс: {cls}, Цвет: {user['hedgehog_color']}\n"
+            f"Сытость: {user['satiety']:.0f}%, Счастье: {user['happiness']:.0f}%\n"
+            f"Статус: {status}, Травма: {injured}")
+
+
+async def ai_tool_get_ants_info(user_id: int) -> str:
+    user = await get_user(user_id)
+    if not user:
+        return "Игрок не найден"
+    chance = user['ant_chance']
+    income = user['ants'] * 10
+    return f"Муравьёв: {user['ants']}, Шанс ловли: {chance:.1f}%, Доход: {income} ЕЖ/час"
+
+
+async def ai_tool_get_bank_info(user_id: int) -> str:
+    async with aiosqlite.connect(DB_NAME) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute("SELECT * FROM bank_deposits WHERE user_id = ? AND status = 'active'", (user_id,)) as cursor:
+            deposits = await cursor.fetchall()
+    if not deposits:
+        return "Нет активных вкладов. Условия: 🐾0.5%/день(от 10), 🦔1.2%/день 24ч блок(от 50), 🏆2%/день 72ч блок(от 500). Макс 100к, штраф 10%, налог 5%"
+    lines = []
+    for d in deposits:
+        lines.append(f"{d['deposit_type']}: {d['amount']} ЕЖ, начислено {d['accrued']} ЕЖ, статус: {d['status']}")
+    return "Ваши вклады:\n" + "\n".join(lines)
+
+
+async def ai_tool_get_inventory(user_id: int) -> str:
+    async with aiosqlite.connect(DB_NAME) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute(
+            "SELECT si.name, i.quantity FROM inventory i JOIN shop_items si ON i.item_id = si.id WHERE i.user_id = ? AND i.quantity > 0",
+            (user_id,)
+        ) as cursor:
+            items = await cursor.fetchall()
+    if not items:
+        return "Инвентарь пуст"
+    return "Инвентарь: " + ", ".join(f"{it['name']} x{it['quantity']}" for it in items)
+
+
+async def ai_tool_get_mining_info(user_id: int) -> str:
+    async with aiosqlite.connect(DB_NAME) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute("SELECT * FROM mining_state WHERE user_id = ?", (user_id,)) as cursor:
+            state = await cursor.fetchone()
+        async with db.execute("SELECT COUNT(*) as cnt FROM mining_rigs WHERE user_id = ?", (user_id,)) as cursor:
+            rigs_count = (await cursor.fetchone())['cnt']
+    if not state or rigs_count == 0:
+        return "Майнинг не настроен. Нужно: купить GPU+БП+Плата, собрать риг. Компоненты от GT710 до RTX4090. Макс 5 ригов."
+    return f"Ригов: {rigs_count}, Ежкоинов: {state['ezhcoins']:.1f}, Майнит: {'Да' if state['is_mining'] else 'Нет'}, Всего намайнено: {state['total_mined']:.1f}"
+
+
+async def ai_tool_get_referral_info(user_id: int) -> str:
+    user = await get_user(user_id)
+    if not user:
+        return "Игрок не найден"
+    bot_username = await _get_bot_username()
+    link = f"https://t.me/{bot_username}?start={user_id}"
+    return (f"Рефералов: {user['referrals_count']}, Заработано: {user['referrals_earned']} ЕЖ\n"
+            f"Ссылка: {link}")
+
+
+async def ai_tool_get_section_details(user_id: int, section: str) -> str:
+    return SECTION_DETAILS.get(section.lower(), f"Раздел '{section}' не найден. Доступные: " + ", ".join(SECTION_DETAILS.keys()))
+
+
+# Маппинг имен инструментов на функции
+AI_TOOL_FUNCTIONS = {
+    "get_balance": ai_tool_get_balance,
+    "get_hedgehog_info": ai_tool_get_hedgehog_info,
+    "get_ants_info": ai_tool_get_ants_info,
+    "get_bank_info": ai_tool_get_bank_info,
+    "get_inventory": ai_tool_get_inventory,
+    "get_mining_info": ai_tool_get_mining_info,
+    "get_referral_info": ai_tool_get_referral_info,
+    "get_section_details": ai_tool_get_section_details,
+}
 
 # =====================================
 # 🎨 ЦВЕТА ИГОЛОК
@@ -3790,37 +3971,17 @@ async def call_hedgehog(callback: CallbackQuery, state: FSMContext):
         await callback.answer("❌ Нажмите /start сначала!", show_alert=True)
         return
     
-    balance = user['balance']
-    hedgehog_name = user['hedgehog_name']
-    hedgehog_color = user['hedgehog_color']
-    hedgehog_class = user['hedgehog_class']
-    satiety = user['satiety']
-    happiness = user['happiness']
-    status = user['status']
-    
-    # Формируем контекст пользователя для ИИ
-    class_names = {"normal": "Обычный 🦔", "ejidze": "Ежидзе 🤠", "fat": "Толстый 🦔", "golden": "Золотой 🟡"}
-    user_context = (
-        f"ИНФОРМАЦИЯ ОБ ЭТОМ ИГРОКЕ:\n"
-        f"- ID: {user_id}, Username: @{user['username'] or 'не указан'}\n"
-        f"- Баланс: {balance} Ежидзиков👍, {user['elephant_skin']} Кожи слона🐘, {user['diamonds']} Алмазов💎\n"
-        f"- Ёж: {hedgehog_name}, Класс: {class_names.get(hedgehog_class, hedgehog_class)}, Цвет: {hedgehog_color}\n"
-        f"- Сытость: {satiety:.0f}%, Счастье: {happiness:.0f}%\n"
-        f"- Статус: {'живой' if status == 'alive' else 'мёртвый 💀'}\n"
-        f"- Муравьи: {user['ants']}, Кормлений: {user['total_feedings']}\n"
-        f"- Рефералов: {user['referrals_count']}\n"
-    )
-    
-    # Сохраняем контекст в FSM
-    await state.update_data(ai_system=AI_HEDGEHOG_SYSTEM + "\n\n" + user_context)
+    # Сохраняем пустую историю чата
+    await state.update_data(ai_history=[])
     await state.set_state(UserStates.ai_chat)
     
-    status_emoji = "🟢" if status == 'alive' else "💀"
+    hedgehog_name = user['hedgehog_name']
+    status_emoji = "🟢" if user['status'] == 'alive' else "💀"
     text = (
         f"📞 Звонок ежу {hedgehog_name}! {status_emoji}\n\n"
         f"💬 Напиши сообщение — ёж ответит!\n"
         f"💰 Стоимость: 1 сообщение = {AI_CHAT_COST} Ежидзиков\n"
-        f"💵 У тебя: {balance} Ежидзиков\n\n"
+        f"💵 У тебя: {user['balance']} Ежидзиков\n\n"
         f"❌ Нажми «Завершить звонок» чтобы выйти"
     )
     
@@ -3839,7 +4000,7 @@ async def call_end(callback: CallbackQuery, state: FSMContext):
 
 @router.message(UserStates.ai_chat)
 async def ai_chat_message(message: Message, state: FSMContext):
-    """Обработка сообщения в режиме ИИ-чата с ежом."""
+    """Обработка сообщения в режиме ИИ-чата с ежом. С инструментами и памятью."""
     user_id = message.from_user.id
     text = message.text
     if not text:
@@ -3853,9 +4014,7 @@ async def ai_chat_message(message: Message, state: FSMContext):
     
     if user['balance'] < AI_CHAT_COST:
         await message.answer(
-            f"❌ Недостаточно Ежидзиков!\n\n"
-            f"💰 Нужно: {AI_CHAT_COST}\n"
-            f"💵 У тебя: {user['balance']}",
+            f"❌ Недостаточно Ежидзиков!\n\n💰 Нужно: {AI_CHAT_COST}\n💵 У тебя: {user['balance']}",
             reply_markup=InlineKeyboardMarkup(inline_keyboard=[
                 [InlineKeyboardButton(text="❌ Завершить звонок", callback_data="call_end")]
             ])
@@ -3865,52 +4024,103 @@ async def ai_chat_message(message: Message, state: FSMContext):
     # Списываем Ежидзики
     await update_balance(user_id, -AI_CHAT_COST)
     
-    # Обновляем контекст пользователя (баланс изменился)
-    class_names = {"normal": "Обычный 🦔", "ejidze": "Ежидзе 🤠", "fat": "Толстый 🦔", "golden": "Золотой 🟡"}
-    user_context = (
-        f"ИНФОРМАЦИЯ ОБ ЭТОМ ИГРОКЕ:\n"
-        f"- ID: {user_id}, Username: @{user['username'] or 'не указан'}\n"
-        f"- Баланс: {user['balance'] - AI_CHAT_COST} Ежидзиков👍, {user['elephant_skin']} Кожи слона🐘, {user['diamonds']} Алмазов💎\n"
-        f"- Ёж: {user['hedgehog_name']}, Класс: {class_names.get(user['hedgehog_class'], user['hedgehog_class'])}, Цвет: {user['hedgehog_color']}\n"
-        f"- Сытость: {user['satiety']:.0f}%, Счастье: {user['happiness']:.0f}%\n"
-        f"- Статус: {'живой' if user['status'] == 'alive' else 'мёртвый 💀'}\n"
-        f"- Муравьи: {user['ants']}, Кормлений: {user['total_feedings']}\n"
-        f"- Рефералов: {user['referrals_count']}\n"
-    )
-    system_prompt = AI_HEDGEHOG_SYSTEM + "\n\n" + user_context
+    # Загружаем историю из FSM
+    data = await state.get_data()
+    ai_history = data.get("ai_history", [])
+    
+    # Формируем сообщения для API
+    api_messages = [{"role": "system", "content": AI_HEDGEHOG_SYSTEM}]
+    
+    # Добавляем историю (последние N пар)
+    for entry in ai_history[-AI_HISTORY_LIMIT:]:
+        api_messages.append({"role": "user", "content": entry["user"]})
+        api_messages.append({"role": "assistant", "content": entry["assistant"]})
+    
+    # Добавляем текущее сообщение
+    api_messages.append({"role": "user", "content": text})
     
     # Показываем "Думает..."
     chat_id = message.chat.id
     draft_id = random.randint(1, 2**31 - 1)
     
     try:
-        # Вызов Groq API (не стриминг — собираем полный ответ)
-        completion = groq_client.chat.completions.create(
-            model="qwen/qwen3-32b",
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": text}
-            ],
-            temperature=0.6,
-            max_completion_tokens=4096,
-            top_p=0.95,
-            stream=False
-        )
+        # Цикл обработки: вызов API → tool_calls → выполнение → повторный вызов
+        max_iterations = 5
+        final_response = None
         
-        ai_response = completion.choices[0].message.content or "Фыр-фыр... *свернулся в клубок* 🦔"
+        for _ in range(max_iterations):
+            completion = groq_client.chat.completions.create(
+                model="qwen/qwen3-32b",
+                messages=api_messages,
+                tools=AI_TOOLS,
+                temperature=0.6,
+                max_completion_tokens=2048,
+                top_p=0.95,
+                stream=False
+            )
+            
+            choice = completion.choices[0]
+            msg = choice.message
+            
+            # Если модель хочет вызвать инструменты
+            if msg.tool_calls:
+                # Добавляем сообщение ассистента с tool_calls в историю
+                api_messages.append(msg)
+                
+                # Выполняем каждый инструмент
+                for tool_call in msg.tool_calls:
+                    func_name = tool_call.function.name
+                    func_args = {}
+                    
+                    try:
+                        if tool_call.function.arguments:
+                            func_args = json.loads(tool_call.function.arguments)
+                    except Exception:
+                        pass
+                    
+                    # Выполняем функцию
+                    tool_func = AI_TOOL_FUNCTIONS.get(func_name)
+                    if tool_func:
+                        try:
+                            result = await tool_func(user_id, **func_args)
+                        except Exception as e:
+                            result = f"Ошибка: {e}"
+                    else:
+                        result = f"Инструмент {func_name} не найден"
+                    
+                    # Добавляем результат инструмента в историю
+                    api_messages.append({
+                        "role": "tool",
+                        "content": str(result),
+                        "tool_call_id": tool_call.id
+                    })
+                
+                # Продолжаем цикл — отправляем результаты инструментов обратно
+                continue
+            
+            # Если нет tool_calls — это финальный ответ
+            final_response = msg.content or "Фыр-фыр... *свернулся в клубок* 🦔"
+            break
         
-        # Убираем <think...</think» блоки если есть (Qwen3 reasoning)
-        ai_response = re.sub(r'<think[\s\S]*?</think\s*>', '', ai_response).strip()
+        if not final_response:
+            final_response = "Фыр-фыр... *шуршит иголками* 🦔"
         
-        if not ai_response:
-            ai_response = "Фыр-фыр... 🦔"
+        # Убираем <think...</think» блоки (Qwen3 reasoning)
+        final_response = re.sub(r'<think[\s\S]*?</think\s*>', '', final_response).strip()
+        if not final_response:
+            final_response = "Фыр-фыр... 🦔"
         
     except Exception as e:
         print(f"❌ Ошибка Groq API: {e}")
-        ai_response = "Фыр-фыр... *шуршит иголками* Что-то связь плохая... Попробуй ещё раз! 📞🦔"
+        final_response = "Фыр-фыр... *шуршит иголками* Что-то связь плохая... Попробуй ещё раз! 📞🦔"
+    
+    # Сохраняем в историю
+    ai_history.append({"user": text, "assistant": final_response})
+    ai_history = ai_history[-AI_HISTORY_LIMIT:]
+    await state.update_data(ai_history=ai_history)
     
     # Стримим ответ ежа
-    full_text = f"🦔 {ai_response}\n\n💰 -{AI_CHAT_COST} Ежидзиков"
+    full_text = f"🦔 {final_response}\n\n💰 -{AI_CHAT_COST} Ежидзиков"
     
     streaming_ok = False
     try:
@@ -3935,21 +4145,12 @@ async def ai_chat_message(message: Message, state: FSMContext):
         await asyncio.sleep(0.4)
     
     # Финальное сообщение
-    new_balance = user['balance'] - AI_CHAT_COST
-    try:
-        await message.answer(
-            full_text,
-            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="❌ Завершить звонок", callback_data="call_end")]
-            ])
-        )
-    except Exception:
-        await message.answer(
-            full_text,
-            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="❌ Завершить звонок", callback_data="call_end")]
-            ])
-        )
+    await message.answer(
+        full_text,
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="❌ Завершить звонок", callback_data="call_end")]
+        ])
+    )
 
 # =====================================
 # ♻️ ОБМЕННИК
