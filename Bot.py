@@ -497,7 +497,10 @@ async def init_db():
             ("users", "alert_sent", "INTEGER DEFAULT 0"),
             # Кузница
             ("forge_items", "smelt_result_id", "INTEGER DEFAULT NULL"),
-            ("forge_items", "smelt_result_qty", "INTEGER DEFAULT 1")
+            ("forge_items", "smelt_result_qty", "INTEGER DEFAULT 1"),
+            # Домашнее казино
+            ("users", "home_casino", "INTEGER DEFAULT 0"),
+            ("users", "home_casino_balance", "INTEGER DEFAULT 0")
         ]
         
         for table, column, col_type in new_columns:
@@ -1038,6 +1041,12 @@ class BankStates(StatesGroup):
     # Открытие вклада — ввод суммы
     waiting_deposit_amount = State()
 
+class HomeCasinoStates(StatesGroup):
+    dice_numbers = State()
+    star_game = State()
+    custom_bet_amount = State()
+    add_balance = State()
+
 # =====================================
 # 🦔 ГОВОРЯЩИЙ ЕЖ - ЧАСТЬ 2/5 🦔
 # =====================================
@@ -1141,6 +1150,7 @@ def puzzle_keyboard():
         [InlineKeyboardButton(text="🛒 Магазин", callback_data="shop", style=ButtonStyle.SUCCESS)],
         [InlineKeyboardButton(text="⚒️ Кузница", callback_data="forge", style=ButtonStyle.PRIMARY)],
         [InlineKeyboardButton(text="💻 Майнинг", callback_data="mining", style=ButtonStyle.PRIMARY)],
+        [InlineKeyboardButton(text="🎰 Домашнее казино", callback_data="hc_casino", style=ButtonStyle.PRIMARY)],
         [InlineKeyboardButton(text="🤖 ИИ-ЕЖ", callback_data="stub_ai")],
         [InlineKeyboardButton(text="Назад ◀️◀️◀️", callback_data="menu")]
     ])
@@ -1327,6 +1337,106 @@ def finances_keyboard():
         [InlineKeyboardButton(text="🐜 Муравьишки!", callback_data="ants")],
         [InlineKeyboardButton(text="🏦 Банк", callback_data="bank", style=ButtonStyle.PRIMARY)],
         [InlineKeyboardButton(text="Назад ◀️◀️◀️", callback_data="menu")]
+    ])
+
+
+# =====================================
+# 🎰 КЛАВИАТУРЫ ДОМАШНЕГО КАЗИНО
+# =====================================
+
+def hc_casino_keyboard():
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="🎲 Кубик", callback_data="hc_dice"),
+            InlineKeyboardButton(text="🦔 Ежино", callback_data="hc_ejino")
+        ],
+        [
+            InlineKeyboardButton(text="🎰 Слоты", callback_data="hc_slots"),
+            InlineKeyboardButton(text="🌟 Звёзды", callback_data="hc_star")
+        ],
+        [InlineKeyboardButton(text="☠️ ×10", callback_data="hc_x10", style=ButtonStyle.DANGER)],
+        [
+            InlineKeyboardButton(text="➕ Начислить", callback_data="hc_add", style=ButtonStyle.SUCCESS),
+            InlineKeyboardButton(text="➖ Убрать", callback_data="hc_remove", style=ButtonStyle.DANGER)
+        ],
+        [InlineKeyboardButton(text="🔄 Сброс баланса", callback_data="hc_reset")],
+        [InlineKeyboardButton(text="💰 Продать казино (150 ЕЖ)", callback_data="hc_sell", style=ButtonStyle.DANGER)],
+        [InlineKeyboardButton(text="Назад ◀️◀️◀️", callback_data="puzzle")]
+    ])
+
+def hc_casino_buy_keyboard():
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🎰 Купить за 300 ЕЖ", callback_data="hc_buy", style=ButtonStyle.SUCCESS)],
+        [InlineKeyboardButton(text="Назад ◀️◀️◀️", callback_data="puzzle")]
+    ])
+
+def hc_bet_keyboard(game_type: str):
+    buttons = [
+        [
+            InlineKeyboardButton(text="10", callback_data=f"hc_bet_{game_type}_10"),
+            InlineKeyboardButton(text="50", callback_data=f"hc_bet_{game_type}_50"),
+            InlineKeyboardButton(text="100", callback_data=f"hc_bet_{game_type}_100")
+        ],
+        [
+            InlineKeyboardButton(text="250", callback_data=f"hc_bet_{game_type}_250"),
+            InlineKeyboardButton(text="500", callback_data=f"hc_bet_{game_type}_500"),
+            InlineKeyboardButton(text="1000", callback_data=f"hc_bet_{game_type}_1000")
+        ],
+        [InlineKeyboardButton(text="🖊 Своя ставка", callback_data=f"hc_bet_{game_type}_custom")],
+        [InlineKeyboardButton(text="Назад ◀️◀️◀️", callback_data="hc_casino")]
+    ]
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+def hc_dice_numbers_keyboard(selected: list):
+    buttons = []
+    for row_start in [1, 4]:
+        row = []
+        for num in range(row_start, row_start + 3):
+            if num in selected:
+                row.append(InlineKeyboardButton(text=f"✅ {num}", callback_data=f"hc_dice_num_{num}"))
+            else:
+                row.append(InlineKeyboardButton(text=str(num), callback_data=f"hc_dice_num_{num}"))
+        buttons.append(row)
+    if len(selected) == 3:
+        buttons.append([InlineKeyboardButton(text="🎲 Бросить кубик!", callback_data="hc_dice_roll")])
+    else:
+        buttons.append([InlineKeyboardButton(text=f"Выбрано: {len(selected)}/3", callback_data="noop")])
+    buttons.append([InlineKeyboardButton(text="Назад ◀️◀️◀️", callback_data="hc_casino")])
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+def hc_slots_keyboard():
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🎰 Крутить!", callback_data="hc_slots_spin")],
+        [InlineKeyboardButton(text="Назад ◀️◀️◀️", callback_data="hc_casino")]
+    ])
+
+def hc_ejino_keyboard():
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🦔 Крутить Ежино!", callback_data="hc_ejino_spin")],
+        [InlineKeyboardButton(text="Назад ◀️◀️◀️", callback_data="hc_casino")]
+    ])
+
+def hc_star_field_keyboard(field: list, revealed: list):
+    buttons = []
+    for row in range(5):
+        row_buttons = []
+        for col in range(5):
+            idx = row * 5 + col
+            if idx in revealed:
+                if field[idx] == "⭐":
+                    row_buttons.append(InlineKeyboardButton(text="🌟", callback_data="noop"))
+                else:
+                    row_buttons.append(InlineKeyboardButton(text="❌", callback_data="noop"))
+            else:
+                row_buttons.append(InlineKeyboardButton(text="❓", callback_data=f"hc_star_{idx}"))
+        buttons.append(row_buttons)
+    buttons.append([InlineKeyboardButton(text="💰 Забрать выигрыш", callback_data="hc_star_end"), InlineKeyboardButton(text="❌ Отмена", callback_data="hc_casino")])
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+def hc_x10_keyboard():
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="☠️ РИСКНУТЬ!", callback_data="hc_x10_try", style=ButtonStyle.DANGER)],
+        [InlineKeyboardButton(text="Назад ◀️◀️◀️", callback_data="hc_casino")]
     ])
 
 
@@ -9255,7 +9365,7 @@ async def ignore_ticket(callback: CallbackQuery):
 # 🎟 ПРОМОКОДЫ И КАСТОМНЫЕ КОМАНДЫ (ВВОД)
 # =====================================
 
-# ⚠️ FSM-хэндлеры банка ДОЛЖНЫ быть раньше catch-all (F.text)
+# ⚠️ FSM-хэндлеры банка и домашнего казино ДОЛЖНЫ быть раньше catch-all (F.text)
 @router.message(BankStates.waiting_deposit_amount)
 async def bank_process_deposit(message: Message, state: FSMContext):
     data = await state.get_data()
@@ -9322,6 +9432,83 @@ async def bank_process_deposit(message: Message, state: FSMContext):
         f"{lock_txt}",
         reply_markup=back_button("bank")
     )
+
+
+# --- Домашнее казино: FSM обработка ввода ---
+@router.message(HomeCasinoStates.custom_bet_amount)
+async def hc_process_custom_bet(message: Message, state: FSMContext):
+    try:
+        bet = int(message.text.strip().replace(' ', '').replace(',', ''))
+        if bet <= 0: raise ValueError
+    except ValueError:
+        await message.answer("❌ Введи положительное число!")
+        return
+    
+    data = await state.get_data()
+    game_type = data.get('game_type')
+    
+    hc_bal = await get_hc_balance(message.from_user.id)
+    if hc_bal < bet:
+        await message.answer("❌ Недостаточно Ежедзуков!")
+        return
+    
+    await state.update_data(bet=bet)
+    
+    if game_type == "dice":
+        await state.set_state(HomeCasinoStates.dice_numbers)
+        await state.update_data(selected_numbers=[])
+        await message.answer(f"🎲 Ставка: {bet} Ежедзуков\n\nВыбери 3 числа (1-6):", reply_markup=hc_dice_numbers_keyboard([]))
+    elif game_type == "ejino":
+        await state.set_state(None)
+        await message.answer(f"🦔 ЕЖИНО\n\nСтавка: {bet} Ежедзуков\n\nКрути!", reply_markup=hc_ejino_keyboard())
+    elif game_type == "slots":
+        await state.set_state(None)
+        await message.answer(f"🎰 Слоты\n\nСтавка: {bet} Ежедзуков", reply_markup=hc_slots_keyboard())
+    elif game_type == "star":
+        field = ["❌"] * 25
+        star_positions = random.sample(range(25), 5)
+        for pos in star_positions:
+            field[pos] = "⭐"
+        await state.update_data(field=field, revealed=[], total_win=0)
+        await state.set_state(HomeCasinoStates.star_game)
+        await message.answer(f"🌟 Найди звезду!\n\nСтавка за нажатие: {bet} Ежедзуков\nВыигрыш: 0\n\nНажимай на ❓!", reply_markup=hc_star_field_keyboard(field, []))
+    elif game_type == "x10":
+        await state.set_state(None)
+        await message.answer(f"☠️ ×10 от ставки!\n\nСтавка: {bet} Ежедзуков\n\nШанс 5%! 💀", reply_markup=hc_x10_keyboard())
+    else:
+        await state.clear()
+        await message.answer("❌ Ошибка, попробуй снова.")
+
+
+# ⚠️ HomeCasinoStates.add_balance и custom_bet_amount — до catch-all
+@router.message(HomeCasinoStates.add_balance)
+async def hc_add_process(message: Message, state: FSMContext):
+    data = await state.get_data()
+    action = data.get('hc_action', 'add')
+    await state.clear()
+    
+    user = await get_user(message.from_user.id)
+    if not user or not user['home_casino']:
+        await message.answer("❌ У тебя нет казино!")
+        return
+    try:
+        amount = int(message.text.strip().replace(' ', '').replace(',', ''))
+        if amount <= 0: raise ValueError
+    except ValueError:
+        await message.answer("❌ Введи положительное число!", reply_markup=back_button("hc_casino"))
+        return
+    
+    if action == "remove":
+        hc_bal = await get_hc_balance(message.from_user.id)
+        if amount > hc_bal:
+            amount = hc_bal
+        await update_hc_balance(message.from_user.id, -amount)
+        new_bal = await get_hc_balance(message.from_user.id)
+        await message.answer(f"✅ Списано {amount} Ежедзуков!\n💰 Баланс: {new_bal}", reply_markup=back_button("hc_casino"))
+    else:
+        await update_hc_balance(message.from_user.id, amount)
+        new_bal = await get_hc_balance(message.from_user.id)
+        await message.answer(f"✅ Начислено {amount} Ежедзуков!\n💰 Баланс: {new_bal}", reply_markup=back_button("hc_casino"))
 
 
 @router.message(F.text)
@@ -9451,6 +9638,445 @@ async def inline_query_handler(query: InlineQuery):
             input_message_content=InputTextMessageContent(message_text="Используйте inline режим для отправки промокодов!"),
         )
         await query.answer([result], cache_time=300)
+
+# =====================================
+# 🎰 ДОМАШНЕЕ КАЗИНО
+# =====================================
+
+async def get_hc_balance(user_id: int) -> int:
+    async with aiosqlite.connect(DB_NAME) as db:
+        async with db.execute("SELECT home_casino_balance FROM users WHERE user_id = ?", (user_id,)) as cursor:
+            row = await cursor.fetchone()
+    return row[0] if row else 0
+
+async def update_hc_balance(user_id: int, amount: int):
+    async with aiosqlite.connect(DB_NAME) as db:
+        await db.execute("UPDATE users SET home_casino_balance = home_casino_balance + ? WHERE user_id = ?", (amount, user_id))
+        await db.commit()
+
+async def set_hc_balance(user_id: int, amount: int):
+    async with aiosqlite.connect(DB_NAME) as db:
+        await db.execute("UPDATE users SET home_casino_balance = ? WHERE user_id = ?", (amount, user_id))
+        await db.commit()
+
+# --- ГЛАВНОЕ МЕНЮ ---
+@router.callback_query(F.data == "hc_casino")
+async def hc_casino_menu(callback: CallbackQuery, state: FSMContext):
+    await state.clear()
+    if not await check_access(bot, callback.from_user.id, callback):
+        return
+    
+    user = await get_user(callback.from_user.id)
+    if not user:
+        await callback.answer("❌ Нажмите /start сначала!", show_alert=True)
+        return
+    
+    if not user['home_casino']:
+        await safe_edit_text(
+            callback.message,
+            "🎰 **Домашнее казино**\n\n"
+            "Тут можно играть на фейковые Ежедзуки — без риска, чисто по фану!\n\n"
+            "• Начисляй себе сколько хочешь\n"
+            "• Играй в те же игры что в обычном казино\n"
+            "• Ежедзуки ни на что не влияют — это фантики\n\n"
+            "💰 Цена: 300 Ежидзиков",
+            reply_markup=hc_casino_buy_keyboard(),
+            parse_mode="Markdown"
+        )
+        return
+    
+    hc_bal = await get_hc_balance(callback.from_user.id)
+    await safe_edit_text(
+        callback.message,
+        f"🎰 **Домашнее казино**\n\n"
+        f"💰 Ежедзуков: {hc_bal}\n\n"
+        f"Игры те же, что в обычном — но на фанки!",
+        reply_markup=hc_casino_keyboard(),
+        parse_mode="Markdown"
+    )
+
+# --- ПОКУПКА / ПРОДАЖА ---
+@router.callback_query(F.data == "hc_buy")
+async def hc_buy(callback: CallbackQuery):
+    user = await get_user(callback.from_user.id)
+    if not user:
+        await callback.answer("❌ Нажмите /start!", show_alert=True)
+        return
+    if user['home_casino']:
+        await callback.answer("✅ У тебя уже есть казино!", show_alert=True)
+        return
+    if user['balance'] < 300:
+        await callback.answer("❌ Нужно 300 Ежидзиков!", show_alert=True)
+        return
+    
+    async with aiosqlite.connect(DB_NAME) as db:
+        await db.execute("UPDATE users SET balance = balance - 300, home_casino = 1, home_casino_balance = 1000 WHERE user_id = ?", (callback.from_user.id,))
+        await db.commit()
+    
+    await safe_edit_text(
+        callback.message,
+        "🎰 **Домашнее казино**\n\n"
+        "✅ Куплено! Начислено 1000 Ежедзуков на баланс\n\n"
+        "💰 Ежедзуков: 1000",
+        reply_markup=hc_casino_keyboard(),
+        parse_mode="Markdown"
+    )
+
+@router.callback_query(F.data == "hc_sell")
+async def hc_sell(callback: CallbackQuery):
+    user = await get_user(callback.from_user.id)
+    if not user or not user['home_casino']:
+        await callback.answer("❌ У тебя нет казино!", show_alert=True)
+        return
+    
+    async with aiosqlite.connect(DB_NAME) as db:
+        await db.execute("UPDATE users SET balance = balance + 150, home_casino = 0, home_casino_balance = 0 WHERE user_id = ?", (callback.from_user.id,))
+        await db.commit()
+    
+    await safe_edit_text(
+        callback.message,
+        "🎰 Домашнее казино продано за 150 Ежидзиков 👋",
+        reply_markup=back_button("puzzle")
+    )
+
+# --- НАЧИСЛЕНИЕ / СНЯТИЕ ФАНТИКОВ ---
+@router.callback_query(F.data == "hc_add")
+async def hc_add_prompt(callback: CallbackQuery, state: FSMContext):
+    await state.set_state(HomeCasinoStates.add_balance)
+    await state.update_data(hc_action="add")
+    await safe_edit_text(
+        callback.message,
+        "➕ Введи количество Ежедзуков для начисления:",
+        reply_markup=back_button("hc_casino")
+    )
+
+# hc_add_process вынесен ДО catch-all (см. ниже перед F.text)
+
+@router.callback_query(F.data == "hc_remove")
+async def hc_remove_prompt(callback: CallbackQuery, state: FSMContext):
+    await state.set_state(HomeCasinoStates.add_balance)
+    await state.update_data(hc_action="remove")
+    await safe_edit_text(
+        callback.message,
+        "➖ Введи количество Ежедзуков для списания:",
+        reply_markup=back_button("hc_casino")
+    )
+
+@router.callback_query(F.data == "hc_reset")
+async def hc_reset(callback: CallbackQuery):
+    await set_hc_balance(callback.from_user.id, 0)
+    await safe_edit_text(callback.message, "🔄 Ежедзуки обнулены!", reply_markup=back_button("hc_casino"))
+
+# --- 🎲 КУБИК ---
+@router.callback_query(F.data == "hc_dice")
+async def hc_dice_menu(callback: CallbackQuery):
+    if not await check_access(bot, callback.from_user.id, callback):
+        return
+    hc_bal = await get_hc_balance(callback.from_user.id)
+    await safe_edit_text(
+        callback.message,
+        f"🎲 Бросить кубик\n\nВыбери 3 числа от 1 до 6.\nУгадал — ×2, нет — теряешь ставку.\n\n💰 Ежедзуков: {hc_bal}\n\nВыбери ставку:",
+        reply_markup=hc_bet_keyboard("dice")
+    )
+
+@router.callback_query(F.data.startswith("hc_bet_dice_"), F.data != "hc_bet_dice_custom")
+async def hc_bet_dice(callback: CallbackQuery, state: FSMContext):
+    bet = int(callback.data.replace("hc_bet_dice_", ""))
+    hc_bal = await get_hc_balance(callback.from_user.id)
+    if hc_bal < bet:
+        await callback.answer("❌ Недостаточно Ежедзуков!", show_alert=True)
+        return
+    await state.update_data(bet=bet, selected_numbers=[])
+    await state.set_state(HomeCasinoStates.dice_numbers)
+    await safe_edit_text(callback.message, f"🎲 Ставка: {bet} Ежедзуков\n\nВыбери 3 числа (1-6):", reply_markup=hc_dice_numbers_keyboard([]))
+
+@router.callback_query(F.data.startswith("hc_dice_num_"), HomeCasinoStates.dice_numbers)
+async def hc_dice_select(callback: CallbackQuery, state: FSMContext):
+    num = int(callback.data.replace("hc_dice_num_", ""))
+    data = await state.get_data()
+    selected = data.get('selected_numbers', [])
+    if num in selected:
+        selected.remove(num)
+    elif len(selected) < 3:
+        selected.append(num)
+    else:
+        await callback.answer("Уже выбрано 3 числа!", show_alert=True)
+        return
+    await state.update_data(selected_numbers=selected)
+    await safe_edit_text(callback.message, f"🎲 Ставка: {data['bet']} Ежедзуков\n\nВыбери 3 числа (1-6):\nВыбрано: {selected if selected else 'ничего'}", reply_markup=hc_dice_numbers_keyboard(selected))
+
+@router.callback_query(F.data == "hc_dice_roll", HomeCasinoStates.dice_numbers)
+async def hc_dice_roll(callback: CallbackQuery, state: FSMContext):
+    data = await state.get_data()
+    bet = data['bet']
+    selected = data['selected_numbers']
+    await state.clear()
+    
+    hc_bal = await get_hc_balance(callback.from_user.id)
+    if hc_bal < bet:
+        await callback.answer("❌ Недостаточно Ежедзуков!", show_alert=True)
+        return
+    
+    await update_hc_balance(callback.from_user.id, -bet)
+    result = random.randint(1, 6)
+    
+    if result in selected:
+        win = bet * 2
+        await update_hc_balance(callback.from_user.id, win)
+        await safe_edit_text(callback.message, f"🎲 Кубик показал: {result}\n\n🎉 ПОБЕДА! Твои числа: {selected}\n💰 +{win} Ежедзуков!", reply_markup=back_button("hc_casino"))
+    else:
+        await safe_edit_text(callback.message, f"🎲 Кубик показал: {result}\n\n😔 Мимо... Числа: {selected}\n💸 -{bet} Ежедзуков", reply_markup=back_button("hc_casino"))
+
+# --- 🦔 ЕЖИНО ---
+@router.callback_query(F.data == "hc_ejino")
+async def hc_ejino_menu(callback: CallbackQuery):
+    hc_bal = await get_hc_balance(callback.from_user.id)
+    await safe_edit_text(callback.message, f"🦔 ЕЖИНО — рулетка удачи!\n\nМножители: ×0, ×0.5, ×1, ×1.5, ×2, ×5🔥\n\n💰 Ежедзуков: {hc_bal}\n\nВыбери ставку:", reply_markup=hc_bet_keyboard("ejino"))
+
+@router.callback_query(F.data.startswith("hc_bet_ejino_"), F.data != "hc_bet_ejino_custom")
+async def hc_bet_ejino(callback: CallbackQuery, state: FSMContext):
+    bet = int(callback.data.replace("hc_bet_ejino_", ""))
+    hc_bal = await get_hc_balance(callback.from_user.id)
+    if hc_bal < bet:
+        await callback.answer("❌ Недостаточно Ежедзуков!", show_alert=True)
+        return
+    await state.update_data(bet=bet)
+    await safe_edit_text(callback.message, f"🦔 ЕЖИНО\n\nСтавка: {bet} Ежедзуков\n\nКрути!", reply_markup=hc_ejino_keyboard())
+
+@router.callback_query(F.data == "hc_ejino_spin")
+async def hc_ejino_spin(callback: CallbackQuery, state: FSMContext):
+    data = await state.get_data()
+    bet = data.get('bet', 0)
+    if not bet:
+        await callback.answer("❌ Сначала выбери ставку!", show_alert=True)
+        return
+    user_id = callback.from_user.id
+    chat_id = callback.message.chat.id
+    await state.clear()
+    
+    hc_bal = await get_hc_balance(user_id)
+    if hc_bal < bet:
+        await callback.answer("❌ Недостаточно Ежедзуков!", show_alert=True)
+        return
+    
+    roll = random.randint(1, 100)
+    cumulative = 0
+    multiplier = 0
+    for mult, chance in EJINO_MULTIPLIERS:
+        cumulative += chance
+        if roll <= cumulative:
+            multiplier = mult
+            break
+    
+    win = int(bet * multiplier)
+    profit = win - bet
+    await update_hc_balance(user_id, profit)
+    
+    if multiplier == 5: emoji = "🔥🎉🔥"
+    elif multiplier >= 2: emoji = "🎉"
+    elif multiplier >= 1: emoji = "😐"
+    else: emoji = "😔"
+    
+    spin_text = "🦔 ЕЖИНО крутится... 🎰\n\n"
+    await stream_text(chat_id, spin_text, chunk_size=15, delay=0.04)
+    await asyncio.sleep(0.5)
+    
+    result_text = f"🦔 ЕЖИНО — результат!\n\nРезультат: ×{multiplier} {emoji}\n\nСтавка: {bet} → Выигрыш: {win} Ежедзуков"
+    try:
+        await callback.message.answer(result_text, reply_markup=back_button("hc_casino"))
+    except:
+        await safe_edit_text(callback.message, result_text, reply_markup=back_button("hc_casino"))
+
+# --- 🎰 СЛОТЫ ---
+@router.callback_query(F.data == "hc_slots")
+async def hc_slots_menu(callback: CallbackQuery):
+    hc_bal = await get_hc_balance(callback.from_user.id)
+    await safe_edit_text(callback.message, f"🎰 Слоты\n\n3 разных = ×0\n2 одинаковых = ×1.3\n3 одинаковых = ×2.5\n\n💰 Ежедзуков: {hc_bal}\n\nВыбери ставку:", reply_markup=hc_bet_keyboard("slots"))
+
+@router.callback_query(F.data.startswith("hc_bet_slots_"), F.data != "hc_bet_slots_custom")
+async def hc_bet_slots(callback: CallbackQuery, state: FSMContext):
+    bet = int(callback.data.replace("hc_bet_slots_", ""))
+    hc_bal = await get_hc_balance(callback.from_user.id)
+    if hc_bal < bet:
+        await callback.answer("❌ Недостаточно Ежедзуков!", show_alert=True)
+        return
+    await state.update_data(bet=bet)
+    await safe_edit_text(callback.message, f"🎰 Слоты\n\nСтавка: {bet} Ежедзуков", reply_markup=hc_slots_keyboard())
+
+@router.callback_query(F.data == "hc_slots_spin")
+async def hc_slots_spin(callback: CallbackQuery, state: FSMContext):
+    data = await state.get_data()
+    bet = data.get('bet', 0)
+    if not bet:
+        await callback.answer("❌ Сначала выбери ставку!", show_alert=True)
+        return
+    user_id = callback.from_user.id
+    chat_id = callback.message.chat.id
+    await state.clear()
+    
+    hc_bal = await get_hc_balance(user_id)
+    if hc_bal < bet:
+        await callback.answer("❌ Недостаточно Ежедзуков!", show_alert=True)
+        return
+    
+    result = [random.choice(CASINO_EMOJI) for _ in range(3)]
+    unique = len(set(result))
+    if unique == 1: multiplier = 2.5
+    elif unique == 2: multiplier = 1.3
+    else: multiplier = 0
+    
+    win = int(bet * multiplier)
+    profit = win - bet
+    await update_hc_balance(user_id, profit)
+    
+    if multiplier == 2.5: emoji = "🎉🎉🎉"
+    elif multiplier == 1.3: emoji = "🎉"
+    else: emoji = "😔"
+    
+    slots_text = "🎰 Крутим...\n\n"
+    await stream_text(chat_id, slots_text, chunk_size=20, delay=0.04)
+    for i in range(3):
+        partial = " | ".join(result[:i+1])
+        remaining = " ❓ " * (2 - i)
+        line = f"[ {partial} {remaining}]"
+        draft_id = random.randint(1, 2**31 - 1)
+        try:
+            await bot.send_message_draft(chat_id=chat_id, draft_id=draft_id, text=f"🎰 Крутим...\n\n{line}")
+            await asyncio.sleep(0.6)
+        except: break
+    await asyncio.sleep(0.3)
+    
+    final_text = f"🎰 Результат!\n\n[ {result[0]} | {result[1]} | {result[2]} ]\n\nМножитель: ×{multiplier} {emoji}\n💰 Результат: {win} Ежедзуков"
+    try:
+        await callback.message.answer(final_text, reply_markup=back_button("hc_casino"))
+    except:
+        await safe_edit_text(callback.message, final_text, reply_markup=back_button("hc_casino"))
+
+# --- 🌟 ЗВЁЗДЫ ---
+@router.callback_query(F.data == "hc_star")
+async def hc_star_menu(callback: CallbackQuery):
+    hc_bal = await get_hc_balance(callback.from_user.id)
+    await safe_edit_text(callback.message, f"🌟 Найди звезду!\n\nПоле 5×5, 5 звёзд ⭐\nЗвезда = ×2.5 от ставки\nПусто = ×0\nКаждое нажатие = ставка\n\n💰 Ежедзуков: {hc_bal}\n\nВыбери ставку за нажатие:", reply_markup=hc_bet_keyboard("star"))
+
+@router.callback_query(F.data.startswith("hc_bet_star_"), F.data != "hc_bet_star_custom")
+async def hc_bet_star(callback: CallbackQuery, state: FSMContext):
+    bet = int(callback.data.replace("hc_bet_star_", ""))
+    hc_bal = await get_hc_balance(callback.from_user.id)
+    if hc_bal < bet:
+        await callback.answer("❌ Недостаточно Ежедзуков!", show_alert=True)
+        return
+    field = ["❌"] * 25
+    star_positions = random.sample(range(25), 5)
+    for pos in star_positions:
+        field[pos] = "⭐"
+    await state.update_data(bet=bet, field=field, revealed=[], total_win=0)
+    await state.set_state(HomeCasinoStates.star_game)
+    await safe_edit_text(callback.message, f"🌟 Найди звезду!\n\nСтавка за нажатие: {bet} Ежедзуков\nВыигрыш: 0\n\nНажимай на ❓!", reply_markup=hc_star_field_keyboard(field, []))
+
+@router.callback_query(F.data.startswith("hc_star_"), HomeCasinoStates.star_game)
+async def hc_star_reveal(callback: CallbackQuery, state: FSMContext):
+    if callback.data == "hc_star_end":
+        data = await state.get_data()
+        total_win = data.get('total_win', 0)
+        await state.clear()
+        await safe_edit_text(callback.message, f"🌟 Игра окончена!\n\n💰 Всего выиграно: {total_win} Ежедзуков", reply_markup=back_button("hc_casino"))
+        return
+    
+    idx = int(callback.data.replace("hc_star_", ""))
+    data = await state.get_data()
+    bet = data['bet']
+    field = data['field']
+    revealed = data['revealed']
+    total_win = data['total_win']
+    user_id = callback.from_user.id
+    
+    if idx in revealed:
+        await callback.answer("Уже открыто!")
+        return
+    
+    hc_bal = await get_hc_balance(user_id)
+    if hc_bal < bet:
+        await callback.answer("❌ Недостаточно Ежедзуков!", show_alert=True)
+        return
+    
+    revealed.append(idx)
+    await update_hc_balance(user_id, -bet)
+    
+    if field[idx] == "⭐":
+        win = int(bet * 2.5)
+        total_win += win
+        await update_hc_balance(user_id, win)
+        await callback.answer(f"🌟 ЗВЕЗДА! +{win} Ежедзуков!", show_alert=True)
+    else:
+        await callback.answer(f"❌ Пусто! -{bet} Ежедзуков", show_alert=True)
+    
+    await state.update_data(revealed=revealed, total_win=total_win)
+    new_bal = await get_hc_balance(user_id)
+    await safe_edit_text(callback.message, f"🌟 Найди звезду!\n\nСтавка за нажатие: {bet} Ежедзуков\nВыигрыш: {total_win}\n💰 Ежедзуков: {new_bal}\n\nНажимай на ❓!", reply_markup=hc_star_field_keyboard(field, revealed))
+
+# --- ☠️ ×10 ---
+@router.callback_query(F.data == "hc_x10")
+async def hc_x10_menu(callback: CallbackQuery):
+    hc_bal = await get_hc_balance(callback.from_user.id)
+    await safe_edit_text(callback.message, f"☠️ ×10 от ставки!\n\nШанс: 5%!\nПобеда = ×10 🔥\nПроигрыш = теряешь ставку 💀\n\n💰 Ежедзуков: {hc_bal}\n\nВыбери ставку:", reply_markup=hc_bet_keyboard("x10"))
+
+@router.callback_query(F.data.startswith("hc_bet_x10_"), F.data != "hc_bet_x10_custom")
+async def hc_bet_x10(callback: CallbackQuery, state: FSMContext):
+    bet = int(callback.data.replace("hc_bet_x10_", ""))
+    hc_bal = await get_hc_balance(callback.from_user.id)
+    if hc_bal < bet:
+        await callback.answer("❌ Недостаточно Ежедзуков!", show_alert=True)
+        return
+    await state.update_data(bet=bet)
+    await safe_edit_text(callback.message, f"☠️ ×10 от ставки!\n\nСтавка: {bet} Ежедзуков\n\nТы уверен? Шанс 5%! 💀", reply_markup=hc_x10_keyboard())
+
+@router.callback_query(F.data == "hc_x10_try")
+async def hc_x10_try(callback: CallbackQuery, state: FSMContext):
+    data = await state.get_data()
+    bet = data.get('bet', 0)
+    if not bet:
+        await callback.answer("❌ Сначала выбери ставку!", show_alert=True)
+        return
+    user_id = callback.from_user.id
+    chat_id = callback.message.chat.id
+    await state.clear()
+    
+    hc_bal = await get_hc_balance(user_id)
+    if hc_bal < bet:
+        await callback.answer("❌ Недостаточно Ежедзуков!", show_alert=True)
+        return
+    
+    await update_hc_balance(user_id, -bet)
+    
+    if random.random() < 0.05:
+        win = bet * 10
+        await update_hc_balance(user_id, win)
+        await stream_text(chat_id, "☠️ ×10 ... ", chunk_size=4, delay=0.1)
+        await asyncio.sleep(0.8)
+        result_text = f"☠️ НЕВЕРОЯТНО! 🔥🎉🔥\n\nТЫ ВЫИГРАЛ ×10!!!\n💰 +{win} Ежедзуков!"
+        try:
+            await callback.message.answer(result_text, reply_markup=back_button("hc_casino"))
+        except:
+            await safe_edit_text(callback.message, result_text, reply_markup=back_button("hc_casino"))
+    else:
+        await stream_text(chat_id, "☠️ ×10 ... ", chunk_size=4, delay=0.1)
+        await asyncio.sleep(0.5)
+        result_text = f"☠️ Не повезло... 💀\n\n💸 -{bet} Ежедзуков"
+        try:
+            await callback.message.answer(result_text, reply_markup=back_button("hc_casino"))
+        except:
+            await safe_edit_text(callback.message, result_text, reply_markup=back_button("hc_casino"))
+
+# --- СВОЯ СТАВКА (общая) ---
+@router.callback_query(F.data.startswith("hc_bet_"), F.data.endswith("_custom"))
+async def hc_custom_bet_input(callback: CallbackQuery, state: FSMContext):
+    game_type = callback.data.split("_")[2]  # hc_bet_dice_custom -> dice
+    await state.set_state(HomeCasinoStates.custom_bet_amount)
+    await state.update_data(game_type=game_type)
+    await safe_edit_text(callback.message, "🖊 Введи сумму ставки (числом):", reply_markup=back_button("hc_casino"))
+
+# ⚠️ FSM-хэндлер ДОЛЖЕН быть до catch-all
+# (уже размещён BankStates перед F.text, добавим и HomeCasinoStates туда же)
 
 # =====================================
 # 🏦 БАНК «ЁЖ-ФИНАНС»
