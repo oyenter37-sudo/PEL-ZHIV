@@ -1,5 +1,5 @@
 # =====================================
-# 🦔 ГОВОРЯЩИЙ ЕЖ - TELEGRAM BOT v3.8 (Survival Update) 🦔
+# 🦔 ГОВОРЯЩИЙ ЕЖ - TELEGRAM BOT v5 (Casino & Banking Update) 🦔
 # =====================================
 # ЧАСТЬ 1: Импорты, настройки, БД, утилиты
 
@@ -69,7 +69,7 @@ CURRENCY_LABELS = {
 }
 
 # =====================================
-# 🤠 КЛАССЫ ЕЖЕЙ (v3.8)
+# 🤠 КЛАССЫ ЕЖЕЙ (v5)
 # =====================================
 
 CLASSES = {
@@ -95,7 +95,7 @@ EJINO_MULTIPLIERS = [
 ]
 
 # =====================================
-# 🥕 ЕДА (v3.8)
+# 🥕 ЕДА (v5)
 # =====================================
 
 FOOD_ITEMS = [
@@ -309,7 +309,7 @@ async def init_db():
             )
         ''')
 
-        # NEW v3.8 Table for Books
+        # v5 Table for Books
         await db.execute('''
             CREATE TABLE IF NOT EXISTS books (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -489,7 +489,7 @@ async def init_db():
             ("promocodes", "created_at", "TEXT"),
             ("shop_items", "currency", "TEXT DEFAULT 'balance'"),
             ("admins", "can_edit_promos", "INTEGER DEFAULT 0"),
-            # Survival Update v3.8 Columns
+            # v5 Columns
             ("users", "diamonds", "INTEGER DEFAULT 0"),
             ("users", "ban_ads", "INTEGER DEFAULT 0"),
             ("users", "ban_books", "INTEGER DEFAULT 0"),
@@ -1092,7 +1092,7 @@ def subscription_keyboard():
 
 
 def main_menu_keyboard(is_admin: bool = False):
-    # Обновленный дизайн для Survival v3.8
+    # Обновленный дизайн для v5
     buttons = [
         [
             InlineKeyboardButton(text="🦔Покормить🦔", callback_data="feed", style=ButtonStyle.SUCCESS),
@@ -1714,7 +1714,7 @@ def x10_keyboard():
 
 
 # =====================================
-# 🛠 АДМИН КЛАВИАТУРЫ (AdminOS v3.8)
+# 🛠 АДМИН КЛАВИАТУРЫ (AdminOS v5)
 # =====================================
 
 def admin_os_login_keyboard():
@@ -2202,7 +2202,7 @@ async def cmd_start(message: Message, command: CommandObject, state: FSMContext)
         is_user_admin = await is_admin(user_id)
         is_fake = await is_fake_admin(user_id)
         
-        # Проверка статуса (v3.8)
+        # Проверка статуса (v5)
         if user['status'] != 'alive':
             await message.answer("🪦 Вы в посмертии...", reply_markup=death_reply_keyboard())
             if promo_to_activate:
@@ -2296,7 +2296,7 @@ async def noop_callback(callback: CallbackQuery):
 
 
 # =====================================
-# 🪦 МЕНЮ ПОСМЕРТИЯ (v3.8)
+# 🪦 МЕНЮ ПОСМЕРТИЯ (v5)
 # =====================================
 
 @router.message(F.text == "🔘 Получить 1 ежидзик за клик 😢")
@@ -2648,7 +2648,7 @@ async def reply_admin_panel(message: Message, state: FSMContext):
     if await is_admin(user_id):
         # Реальный админ -> AdminOS
         await message.answer(
-            "🔒 **Hedgehog AdminOS v3.8**\nДоступ разрешен. Загрузка модулей...",
+            "🔒 **Hedgehog AdminOS v5**\nДоступ разрешен. Загрузка модулей...",
             reply_markup=admin_os_login_keyboard(),
             parse_mode="Markdown"
         )
@@ -2854,7 +2854,7 @@ async def image_test_generate(message: Message, state: FSMContext):
             small_font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 16)
         except Exception:
             small_font = ImageFont.load_default()
-        draw.text((width - 170, height - 38), "🦔 Говорящий Ёж v3.8", fill=(200, 180, 255, 140), font=small_font)
+        draw.text((width - 150, height - 38), "🦔 Говорящий Ёж v5", fill=(200, 180, 255, 140), font=small_font)
 
         bio = io.BytesIO()
         image.save(bio, 'PNG')
@@ -2876,7 +2876,7 @@ async def cancel_image_test(callback: CallbackQuery, state: FSMContext):
     await callback.message.answer("Отменено.")
 
 # =====================================
-# 🥕 ПОКОРМИТЬ (v3.8 Diamond Drop)
+# 🥕 ПОКОРМИТЬ (v5 Diamond Drop)
 # =====================================
 
 @router.callback_query(F.data == "feed")
@@ -2968,7 +2968,7 @@ async def do_feed_item(callback: CallbackQuery):
     )
 
 # =====================================
-# 🤚 ПОГЛАДИТЬ (v3.8 Diamond Drop)
+# 🤚 ПОГЛАДИТЬ (v5 Diamond Drop)
 # =====================================
 
 @router.callback_query(F.data == "pet")
@@ -3744,7 +3744,7 @@ async def process_exchange_to_balance(callback: CallbackQuery):
     await exchange_menu(callback)
 
 # =====================================
-# 💎 АЛМАЗЫ (v3.8)
+# 💎 АЛМАЗЫ (v5)
 # =====================================
 
 @router.callback_query(F.data == "diamond_menu")
@@ -6175,7 +6175,7 @@ async def slots_spin(callback: CallbackQuery, state: FSMContext):
         await safe_edit_text(callback.message, final_text, reply_markup=back_button("casino"))
 
 
-# 🌟 НАЙДИ ЗВЕЗДУ (Updated v3.8 Logic)
+# 🌟 НАЙДИ ЗВЕЗДУ (Updated v5 Logic)
 @router.callback_query(F.data == "casino_star")
 async def casino_star(callback: CallbackQuery):
     if not await check_access(bot, callback.from_user.id, callback):
@@ -6272,7 +6272,7 @@ async def star_reveal(callback: CallbackQuery, state: FSMContext):
         await update_balance(user_id, win)
         await callback.answer(f"🌟 ЗВЕЗДА! +{win} Ежидзиков👍!", show_alert=True)
     else:
-        win = 0 # Loss in v3.8
+        win = 0 # Loss in v5
         await callback.answer(f"❌ Пусто! Ты потерял {bet} Ежидзиков👍", show_alert=True)
     
     await state.update_data(revealed=revealed, total_win=total_win)
@@ -6777,7 +6777,7 @@ async def buy_item(callback: CallbackQuery):
 
 
 # =====================================
-# 📚 БИБЛИОТЕКА (v3.8)
+# 📚 БИБЛИОТЕКА (v5)
 # =====================================
 
 @router.callback_query(F.data == "book_menu")
@@ -7465,7 +7465,7 @@ async def confirm_super_reset(callback: CallbackQuery):
 # =====================================
 # 🦔 ГОВОРЯЩИЙ ЕЖ - ЧАСТЬ 4B/5 🦔
 # =====================================
-# Админ-панель (AdminOS v3.8)
+# Админ-панель (AdminOS v5)
 
 # =====================================
 # 🛠 АДМИН-ПАНЕЛЬ
@@ -9360,7 +9360,7 @@ async def delete_command(callback: CallbackQuery):
 
 
 # =====================================
-# 📚 МОДЕРАЦИЯ КНИГ (v3.8)
+# 📚 МОДЕРАЦИЯ КНИГ (v5)
 # =====================================
 
 @router.callback_query(F.data.startswith("approve_book_"))
@@ -10675,7 +10675,7 @@ async def bank_interest_loop():
 
 
 async def hunger_loop():
-    # Реализация механики выживания v3.8
+    # Реализация механики выживания v5
     # Еж умирает за 3 дня (72 часа) = 100% сытости.
     # Обновление каждые 10 минут.
     # 72 часа = 432 интервала по 10 минут.
@@ -10771,7 +10771,7 @@ async def main():
         asyncio.create_task(hunger_loop())
         
         print("=" * 50)
-        print("🦔 Бот 'Говорящий Еж' v3.8 (Survival Update) запущен!")
+        print("🦔 Бот 'Говорящий Еж' v5 (Casino & Banking Update) запущен!")
         print("=" * 50)
         print(f"👑 Главный админ: @{MAIN_ADMIN_USERNAME}")
         print(f"📢 Канал: {CHANNEL_LINK}")
