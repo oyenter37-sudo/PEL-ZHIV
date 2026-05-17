@@ -2802,12 +2802,14 @@ async def image_test_generate(message: Message, state: FSMContext):
 
         draw = ImageDraw.Draw(image)
 
-        # Шрифт с поддержкой кириллицы
+        # Шрифт с поддержкой кириллицы (DejaVu — ставится через apt в Dockerfile)
         font_paths = [
-            "/usr/share/fonts/truetype/noto-serif-sc/NotoSerifSC-Bold.ttf",
-            "/usr/share/fonts/truetype/noto-serif-sc/NotoSerifSC-Regular.ttf",
             "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
             "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+            "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
+            "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
+            "/usr/share/fonts/truetype/noto-serif-sc/NotoSerifSC-Bold.ttf",
+            "/usr/share/fonts/truetype/noto-serif-sc/NotoSerifSC-Regular.ttf",
         ]
         font = None
         for fp in font_paths:
@@ -2850,9 +2852,14 @@ async def image_test_generate(message: Message, state: FSMContext):
             current_y += line_heights[i] + line_spacing
 
         # Водяной знак
-        try:
-            small_font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 16)
-        except Exception:
+        small_font = None
+        for sf in ["/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf"]:
+            try:
+                small_font = ImageFont.truetype(sf, 16)
+                break
+            except Exception:
+                continue
+        if small_font is None:
             small_font = ImageFont.load_default()
         draw.text((width - 150, height - 38), "🦔 Говорящий Ёж v5", fill=(200, 180, 255, 140), font=small_font)
 
