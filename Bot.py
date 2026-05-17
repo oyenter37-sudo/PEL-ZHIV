@@ -9255,6 +9255,75 @@ async def ignore_ticket(callback: CallbackQuery):
 # 🎟 ПРОМОКОДЫ И КАСТОМНЫЕ КОМАНДЫ (ВВОД)
 # =====================================
 
+# ⚠️ FSM-хэндлеры банка ДОЛЖНЫ быть раньше catch-all (F.text)
+@router.message(BankStates.waiting_deposit_amount)
+async def bank_process_deposit(message: Message, state: FSMContext):
+    data = await state.get_data()
+    dtype = data.get('deposit_type')
+    await state.clear()
+    
+    if not dtype or dtype not in BANK_DEPOSIT_TYPES:
+        await message.answer("❌ Ошибка, попробуйте снова.")
+        return
+    
+    info = BANK_DEPOSIT_TYPES[dtype]
+    
+    # Парсим сумму
+    try:
+        amount = int(message.text.strip().replace(' ', '').replace(',', ''))
+    except ValueError:
+        await message.answer("❌ Введите целое число!", reply_markup=back_button("bank_open"))
+        return
+    
+    if amount < info['min_amount']:
+        await message.answer(f"❌ Минимальная сумма для этого вклада: {info['min_amount']} ЕЖ", reply_markup=back_button("bank_open"))
+        return
+    
+    if amount > BANK_MAX_DEPOSIT:
+        await message.answer(f"❌ Максимальная сумма вклада: {BANK_MAX_DEPOSIT:,} ЕЖ", reply_markup=back_button("bank_open"))
+        return
+    
+    user = await get_user(message.from_user.id)
+    if not user or user['balance'] < amount:
+        await message.answer("❌ Недостаточно Ежидзиков!", reply_markup=back_button("bank_open"))
+        return
+    
+    # Проверяем что такого типа ещё нет
+    async with aiosqlite.connect(DB_NAME) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute("SELECT id FROM bank_deposits WHERE user_id = ? AND deposit_type = ? AND status = 'active'", (message.from_user.id, dtype)) as cursor:
+            existing = await cursor.fetchone()
+        if existing:
+            await message.answer("❌ У вас уже есть активный вклад этого типа!", reply_markup=back_button("bank"))
+            return
+        
+        # Списываем деньги
+        await db.execute("UPDATE users SET balance = balance - ? WHERE user_id = ?", (amount, message.from_user.id))
+        
+        now = datetime.now()
+        unlock_at = None
+        is_locked = 0
+        if info['lock_hours'] > 0:
+            unlock_at = (now + timedelta(hours=info['lock_hours'])).strftime("%Y-%m-%d %H:%M:%S")
+            is_locked = 1
+        
+        await db.execute(
+            "INSERT INTO bank_deposits (user_id, deposit_type, amount, accrued, opened_at, unlock_at, is_locked, status) VALUES (?, ?, ?, 0, ?, ?, ?, 'active')",
+            (message.from_user.id, dtype, amount, now.strftime("%Y-%m-%d %H:%M:%S"), unlock_at, is_locked)
+        )
+        await db.commit()
+    
+    lock_txt = f"\n🔒 Разблокировка: {unlock_at}" if unlock_at else "\n🔓 Снятие в любой момент"
+    await message.answer(
+        f"✅ Вклад открыт!\n\n"
+        f"{info['name']}\n"
+        f"💵 Сумма: {amount} ЕЖ\n"
+        f"📊 Ставка: {info['rate']}%/сут"
+        f"{lock_txt}",
+        reply_markup=back_button("bank")
+    )
+
+
 @router.message(F.text)
 async def check_promocode_and_commands(message: Message, state: FSMContext):
     current_state = await state.get_state()
@@ -9450,7 +9519,8 @@ async def bank_info(callback: CallbackQuery):
 
 
 @router.callback_query(F.data == "bank_open")
-async def bank_open_menu(callback: CallbackQuery):
+async def bank_open_menu(callback: CallbackQuery, state: FSMContext):
+    await state.clear()
     if not await check_access(bot, callback.from_user.id, callback):
         return
     
@@ -9519,74 +9589,6 @@ async def bank_select_deposit_type(callback: CallbackQuery, state: FSMContext):
     
     buttons = [[InlineKeyboardButton(text="❌ Отмена", callback_data="bank_open")]]
     await safe_edit_text(callback.message, text, reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons))
-
-
-@router.message(BankStates.waiting_deposit_amount)
-async def bank_process_deposit(message: Message, state: FSMContext):
-    data = await state.get_data()
-    dtype = data.get('deposit_type')
-    await state.clear()
-    
-    if not dtype or dtype not in BANK_DEPOSIT_TYPES:
-        await message.answer("❌ Ошибка, попробуйте снова.")
-        return
-    
-    info = BANK_DEPOSIT_TYPES[dtype]
-    
-    # Парсим сумму
-    try:
-        amount = int(message.text.strip().replace(' ', '').replace(',', ''))
-    except ValueError:
-        await message.answer("❌ Введите целое число!", reply_markup=back_button("bank_open"))
-        return
-    
-    if amount < info['min_amount']:
-        await message.answer(f"❌ Минимальная сумма для этого вклада: {info['min_amount']} ЕЖ", reply_markup=back_button("bank_open"))
-        return
-    
-    if amount > BANK_MAX_DEPOSIT:
-        await message.answer(f"❌ Максимальная сумма вклада: {BANK_MAX_DEPOSIT:,} ЕЖ", reply_markup=back_button("bank_open"))
-        return
-    
-    user = await get_user(message.from_user.id)
-    if not user or user['balance'] < amount:
-        await message.answer("❌ Недостаточно Ежидзиков!", reply_markup=back_button("bank_open"))
-        return
-    
-    # Проверяем что такого типа ещё нет
-    async with aiosqlite.connect(DB_NAME) as db:
-        db.row_factory = aiosqlite.Row
-        async with db.execute("SELECT id FROM bank_deposits WHERE user_id = ? AND deposit_type = ? AND status = 'active'", (message.from_user.id, dtype)) as cursor:
-            existing = await cursor.fetchone()
-        if existing:
-            await message.answer("❌ У вас уже есть активный вклад этого типа!", reply_markup=back_button("bank"))
-            return
-        
-        # Списываем деньги
-        await db.execute("UPDATE users SET balance = balance - ? WHERE user_id = ?", (amount, message.from_user.id))
-        
-        now = datetime.now()
-        unlock_at = None
-        is_locked = 0
-        if info['lock_hours'] > 0:
-            unlock_at = (now + timedelta(hours=info['lock_hours'])).strftime("%Y-%m-%d %H:%M:%S")
-            is_locked = 1
-        
-        await db.execute(
-            "INSERT INTO bank_deposits (user_id, deposit_type, amount, accrued, opened_at, unlock_at, is_locked, status) VALUES (?, ?, ?, 0, ?, ?, ?, 'active')",
-            (message.from_user.id, dtype, amount, now.strftime("%Y-%m-%d %H:%M:%S"), unlock_at, is_locked)
-        )
-        await db.commit()
-    
-    lock_txt = f"\n🔒 Разблокировка: {unlock_at}" if unlock_at else "\n🔓 Снятие в любой момент"
-    await message.answer(
-        f"✅ Вклад открыт!\n\n"
-        f"{info['name']}\n"
-        f"💵 Сумма: {amount} ЕЖ\n"
-        f"📊 Ставка: {info['rate']}%/сут"
-        f"{lock_txt}",
-        reply_markup=back_button("bank")
-    )
 
 
 @router.callback_query(F.data == "bank_my_deposits")
