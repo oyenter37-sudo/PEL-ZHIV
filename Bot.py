@@ -15,7 +15,7 @@ from aiogram.types import (
     Message, CallbackQuery, InlineKeyboardButton, 
     InlineKeyboardMarkup, ReplyKeyboardMarkup, KeyboardButton,
     BufferedInputFile, FSInputFile, InlineQuery, InlineQueryResultArticle, 
-    InputTextMessageContent
+    InputTextMessageContent, CopyTextButton
 )
 from aiogram.filters import CommandStart, Command, CommandObject, StateFilter
 from aiogram.fsm.context import FSMContext
@@ -3999,28 +3999,36 @@ async def process_transfer_amount(message: Message, state: FSMContext):
 
 @router.callback_query(F.data == "website")
 async def website_info(callback: CallbackQuery):
+    from web import PUBLIC_URL
+    site_url = PUBLIC_URL or "http://localhost:8080"
     text = (
-        "🌐 Это официальный сайт 🦔\n\n"
-        "Там будут новости, обновления и приколы."
+        "🌐 **Официальный сайт Говорящего Ежа**\n\n"
+        "На сайте можно посмотреть статистику своего ежа, финансы, вклады и многое другое — в красивом интерфейсе!\n\n"
+        "🔑 Сначала получите ключ входа (кнопка ниже), затем введите его на сайте."
     )
-    await safe_edit_text(callback.message, text, reply_markup=back_button("menu"), media_screen="website")
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🌐 Открыть сайт", url=site_url)],
+        [InlineKeyboardButton(text="🔑 Получить ключ входа", callback_data="web_key")],
+        [InlineKeyboardButton(text="◀️ Назад", callback_data="menu")]
+    ])
+    await safe_edit_text(callback.message, text, reply_markup=kb, parse_mode="Markdown")
 
 @router.callback_query(F.data == "web_key")
 async def web_key_generate(callback: CallbackQuery):
     from web import generate_web_key, PUBLIC_URL
     user_id = callback.from_user.id
     key = await generate_web_key(user_id)
-    url_text = f"\n🔗 Сайт: {PUBLIC_URL}" if PUBLIC_URL else "\n🔗 Сайт: (загружается...)"
+    site_url = PUBLIC_URL or "http://localhost:8080"
     text = (
         "🔑 **Ключ входа на сайт**\n\n"
-        f"```\n{key}\n```\n\n"
+        f"`{key}`\n\n"
         "⏱ Действителен 1 час\n"
-        "🔗 Введите его на сайте для входа в личный кабинет\n"
-        f"{url_text}\n\n"
+        "🔗 Нажмите «Скопировать» ниже, затем вставьте ключ на сайте\n\n"
         "⚠️ Не передавайте ключ другим!"
     )
     kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🌐 Открыть сайт", callback_data="website")],
+        [InlineKeyboardButton(text="📋 Скопировать", copy_text=CopyTextButton(text=key))],
+        [InlineKeyboardButton(text="🌐 Открыть сайт", url=site_url)],
         [InlineKeyboardButton(text="🔄 Новый ключ", callback_data="web_key")],
         [InlineKeyboardButton(text="◀️ Назад", callback_data="menu")]
     ])
@@ -10875,10 +10883,10 @@ async def main():
         asyncio.create_task(bank_interest_loop())
         asyncio.create_task(hunger_loop())
         
-        # Start web server
+        # Start web server (non-blocking!)
         try:
             from web import start_web_server
-            await start_web_server()
+            asyncio.create_task(start_web_server())
         except Exception as e:
             print(f"⚠️ Web-сервер не запущен: {e}")
         

@@ -702,15 +702,20 @@ async def start_web_server():
     await site.start()
     print("🌐 Web-сервер запущен на порту 8080")
 
-    # Запускаем cloudflared туннель
-    await _start_cloudflare_tunnel()
+    # Запускаем cloudflared туннель в фоне (не блокирует!)
+    asyncio.create_task(_start_cloudflare_tunnel())
 
 
 async def _start_cloudflare_tunnel():
-    """Запускает cloudflared quick tunnel для публичного доступа."""
+    """Запускает cloudflared quick tunnel для публичного доступа (неблокирующий)."""
     global PUBLIC_URL
-    cloudflared_path = os.path.expanduser("~/.local/bin/cloudflared")
-    if not os.path.exists(cloudflared_path):
+    # Ищем cloudflared в нескольких местах
+    cloudflared_path = None
+    for p in ["/usr/local/bin/cloudflared", os.path.expanduser("~/.local/bin/cloudflared"), "cloudflared"]:
+        if os.path.exists(p) or (p == "cloudflared" and os.system("which cloudflared > /dev/null 2>&1") == 0):
+            cloudflared_path = p
+            break
+    if not cloudflared_path:
         print("⚠️ cloudflared не найден, туннель не запущен")
         return
 
@@ -720,20 +725,25 @@ async def _start_cloudflare_tunnel():
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
-        # Читаем stderr чтобы вытащить URL
+        # Читаем stderr чтобы вытащить URL (с общим таймаутом 15 сек)
         url_found = None
-        for _ in range(50):  # ждём до 25 секунд
-            line = await asyncio.wait_for(proc.stderr.readline(), timeout=30)
-            line = line.decode("utf-8", errors="ignore")
-            match = re.search(r'https://[a-z0-9\-]+\.trycloudflare\.com', line)
-            if match:
-                url_found = match.group(0)
-                break
+        try:
+            for _ in range(30):  # до 30 строк
+                line = await asyncio.wait_for(proc.stderr.readline(), timeout=2)
+                line = line.decode("utf-8", errors="ignore")
+                match = re.search(r'https://[a-z0-9\-]+\.trycloudflare\.com', line)
+                if match:
+                    url_found = match.group(0)
+                    break
+                if not line:
+                    break  # stderr закрыт
+        except asyncio.TimeoutError:
+            pass  # таймаут — не критично
 
         if url_found:
             PUBLIC_URL = url_found
             print(f"🌐 Публичный URL: {PUBLIC_URL}")
         else:
-            print("⚠️ Не удалось получить URL туннеля")
+            print("⚠️ Не удалось получить URL туннеля за 15 сек")
     except Exception as e:
         print(f"⚠️ Ошибка запуска cloudflared: {e}")
