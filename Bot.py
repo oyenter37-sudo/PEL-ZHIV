@@ -2696,6 +2696,93 @@ async def image_test_callback(callback: CallbackQuery, state: FSMContext):
         reply_markup=image_test_keyboard()
     )
 
+def _wrap_text(draw: ImageDraw.ImageDraw, text: str, font: ImageFont.FreeTypeFont, max_width: int) -> list:
+    """Разбивает текст на строки с переносом по словам и ширине."""
+    lines = []
+    for paragraph in text.split('\n'):
+        if not paragraph:
+            lines.append("")
+            continue
+        words = paragraph.split(' ')
+        current_line = ""
+        for word in words:
+            test_line = (current_line + " " + word) if current_line else word
+            bbox = draw.textbbox((0, 0), test_line, font=font)
+            if bbox[2] - bbox[0] > max_width and current_line:
+                lines.append(current_line)
+                # Если одно слово длиннее max_width — режем посимвольно
+                bbox_w = draw.textbbox((0, 0), word, font=font)
+                if bbox_w[2] - bbox_w[0] > max_width:
+                    current_line = ""
+                    for ch in word:
+                        tst = current_line + ch
+                        bb = draw.textbbox((0, 0), tst, font=font)
+                        if bb[2] - bb[0] > max_width and current_line:
+                            lines.append(current_line)
+                            current_line = ch
+                        else:
+                            current_line = tst
+                else:
+                    current_line = word
+            else:
+                current_line = test_line
+        if current_line:
+            lines.append(current_line)
+    return lines
+
+
+def _draw_decorative_background(image: Image.Image):
+    """Рисует декоративный фон с градиентом и узорами."""
+    import random
+    width, height = image.size
+    draw = ImageDraw.Draw(image)
+
+    # Градиент: тёмно-синий → фиолетовый → розовый
+    for y in range(height):
+        ratio = y / height
+        if ratio < 0.5:
+            r2 = ratio * 2
+            r = int(15 + r2 * 80)
+            g = int(10 + r2 * 20)
+            b = int(60 + r2 * 100)
+        else:
+            r2 = (ratio - 0.5) * 2
+            r = int(95 + r2 * 120)
+            g = int(30 + r2 * 40)
+            b = int(160 - r2 * 60)
+        draw.line([(0, y), (width, y)], fill=(r, g, b))
+
+    # Полупрозрачные декоративные круги
+    overlay = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+    odraw = ImageDraw.Draw(overlay)
+    random.seed(42)
+    for _ in range(18):
+        cx = random.randint(0, width)
+        cy = random.randint(0, height)
+        rad = random.randint(40, 180)
+        alpha = random.randint(10, 35)
+        color = random.choice([
+            (255, 255, 255, alpha),
+            (200, 150, 255, alpha),
+            (255, 180, 220, alpha),
+            (100, 200, 255, alpha),
+        ])
+        odraw.ellipse([cx - rad, cy - rad, cx + rad, cy + rad], fill=color)
+    image.paste(Image.alpha_composite(image.convert("RGBA"), overlay).convert("RGB"))
+
+    # Тонкие рамки
+    draw = ImageDraw.Draw(image)
+    draw.rectangle([16, 16, width - 17, height - 17], outline=(255, 255, 255, 80), width=2)
+    draw.rectangle([24, 24, width - 25, height - 25], outline=(255, 200, 255, 50), width=1)
+
+    # Уголковые украшения
+    corner_len = 40
+    cc = (255, 220, 255)
+    for cx, cy, dx, dy in [(20, 20, 1, 1), (width - 21, 20, -1, 1), (20, height - 21, 1, -1), (width - 21, height - 21, -1, -1)]:
+        draw.line([(cx, cy), (cx + corner_len * dx, cy)], fill=cc, width=3)
+        draw.line([(cx, cy), (cx, cy + corner_len * dy)], fill=cc, width=3)
+
+
 @router.message(UserStates.image_test_text)
 async def image_test_generate(message: Message, state: FSMContext):
     if not HAS_PILLOW:
@@ -2707,32 +2794,73 @@ async def image_test_generate(message: Message, state: FSMContext):
         return
     
     try:
-        width, height = 512, 512
-        image = Image.new("RGB", (width, height), "white")
-        draw = ImageDraw.Draw(image)
-        
-        try:
-            font = ImageFont.truetype("arial.ttf", 40)
-        except:
-            font = ImageFont.load_default()
-            
-        try:
-            bbox = draw.textbbox((0, 0), text, font=font)
-            text_width = bbox[2] - bbox[0]
-            text_height = bbox[3] - bbox[1]
-        except:
-             text_width, text_height = draw.textsize(text, font=font)
+        width, height = 800, 800
+        image = Image.new("RGB", (width, height))
 
-        x = (width - text_width) / 2
-        y = (height - text_height) / 2
-        
-        draw.text((x, y), text, fill="black", font=font)
-        
+        # Декоративный фон
+        _draw_decorative_background(image)
+
+        draw = ImageDraw.Draw(image)
+
+        # Шрифт с поддержкой кириллицы
+        font_paths = [
+            "/usr/share/fonts/truetype/noto-serif-sc/NotoSerifSC-Bold.ttf",
+            "/usr/share/fonts/truetype/noto-serif-sc/NotoSerifSC-Regular.ttf",
+            "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+            "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+        ]
+        font = None
+        for fp in font_paths:
+            try:
+                font = ImageFont.truetype(fp, 52)
+                break
+            except Exception:
+                continue
+        if font is None:
+            font = ImageFont.load_default()
+
+        # Перенос текста по строкам
+        margin = 60
+        max_text_width = width - margin * 2
+        lines = _wrap_text(draw, text, font, max_text_width)
+
+        # Подсчёт общей высоты блока
+        line_spacing = 18
+        line_heights = []
+        for line in lines:
+            bbox = draw.textbbox((0, 0), line, font=font)
+            line_heights.append(bbox[3] - bbox[1])
+        total_height = sum(line_heights) + line_spacing * (len(lines) - 1)
+
+        # Центрирование по вертикали
+        y_start = (height - total_height) / 2
+
+        # Тень → основной текст
+        current_y = y_start
+        for i, line in enumerate(lines):
+            bbox = draw.textbbox((0, 0), line, font=font)
+            lw = bbox[2] - bbox[0]
+            x = (width - lw) / 2
+
+            # Тень
+            draw.text((x + 2, current_y + 2), line, fill=(0, 0, 0, 120), font=font)
+            # Основной текст — белый с лёгким свечением
+            draw.text((x, current_y), line, fill=(255, 255, 255), font=font)
+
+            current_y += line_heights[i] + line_spacing
+
+        # Водяной знак
+        try:
+            small_font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 16)
+        except Exception:
+            small_font = ImageFont.load_default()
+        draw.text((width - 170, height - 38), "🦔 Говорящий Ёж v3.8", fill=(200, 180, 255, 140), font=small_font)
+
         bio = io.BytesIO()
-        image.save(bio, 'JPEG')
+        image.save(bio, 'PNG')
         bio.seek(0)
         
-        input_file = BufferedInputFile(bio.read(), filename="image_test.jpg")
+        input_file = BufferedInputFile(bio.read(), filename="image_test.png")
         
         await message.answer_photo(input_file, caption=f"✅ Вот твой текст:\n{text}")
         await state.clear()
