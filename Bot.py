@@ -632,9 +632,6 @@ async def ai_tool_action_play_ejino(user_id: int, bet: int) -> str:
             f"💰 Баланс: {user['balance']} ЕЖ")
 
 
-# Маппинг имен инструментов на функции
-AI_TOOL_FUNCTIONS = {
-
 # Описания инструментов для промежуточных сообщений
 TOOL_ACTION_LABELS = {
     # Информационные
@@ -661,7 +658,7 @@ TOOL_ACTION_LABELS = {
     "action_play_ejino": "Кручу Ежино",
 }
 
-# Маппинг имен инструментов на функции (продолжение)
+# Маппинг имен инструментов на функции
 AI_TOOL_FUNCTIONS = {
     # Информационные
     "get_balance": ai_tool_get_balance,
