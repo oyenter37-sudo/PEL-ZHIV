@@ -471,6 +471,15 @@ async def init_db():
             )
         ''')
 
+        # Веб: ключи входа
+        await db.execute('''
+            CREATE TABLE IF NOT EXISTS web_keys (
+                key TEXT PRIMARY KEY,
+                user_id INTEGER NOT NULL,
+                created_at TEXT NOT NULL
+            )
+        ''')
+
         # 2. МИГРАЦИЯ (ДОБАВЛЕНИЕ КОЛОНОК)
         new_columns = [
             ("users", "player_number", "INTEGER"),
@@ -1109,6 +1118,9 @@ def main_menu_keyboard(is_admin: bool = False):
         [
             InlineKeyboardButton(text="🌐 Сайт", callback_data="website"),
              InlineKeyboardButton(text="📞 Звонок", callback_data="call"),
+        ],
+        [
+            InlineKeyboardButton(text="🔑 Ключ входа", callback_data="web_key", style=ButtonStyle.PRIMARY),
         ],
         [
             InlineKeyboardButton(text="👬Пригласить друга👬", callback_data="invite"),
@@ -3992,6 +4004,25 @@ async def website_info(callback: CallbackQuery):
         "Там будут новости, обновления и приколы."
     )
     await safe_edit_text(callback.message, text, reply_markup=back_button("menu"), media_screen="website")
+
+@router.callback_query(F.data == "web_key")
+async def web_key_generate(callback: CallbackQuery):
+    from web import generate_web_key
+    user_id = callback.from_user.id
+    key = await generate_web_key(user_id)
+    text = (
+        "🔑 **Ключ входа на сайт**\n\n"
+        f"```\n{key}\n```\n\n"
+        "⏱ Действителен 1 час\n"
+        "🔗 Введите его на сайте для входа в личный кабинет\n\n"
+        "⚠️ Не передавайте ключ другим!"
+    )
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🌐 Открыть сайт", callback_data="website")],
+        [InlineKeyboardButton(text="🔄 Новый ключ", callback_data="web_key")],
+        [InlineKeyboardButton(text="◀️ Назад", callback_data="menu")]
+    ])
+    await safe_edit_text(callback.message, text, reply_markup=kb, parse_mode="Markdown")
 
 # =====================================
 # ⚒️ КУЗНИЦА
@@ -10841,6 +10872,13 @@ async def main():
         asyncio.create_task(mining_loop())
         asyncio.create_task(bank_interest_loop())
         asyncio.create_task(hunger_loop())
+        
+        # Start web server
+        try:
+            from web import start_web_server
+            await start_web_server()
+        except Exception as e:
+            print(f"⚠️ Web-сервер не запущен: {e}")
         
         print("=" * 50)
         print("🦔 Бот 'Говорящий Еж' v5 (Casino & Banking Update) запущен!")
