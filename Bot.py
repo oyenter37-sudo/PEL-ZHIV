@@ -4501,9 +4501,10 @@ async def ai_chat_message(message: Message, state: FSMContext):
                         model="openai/gpt-oss-120b",
                         messages=api_messages,
                         tools=AI_TOOLS,
-                        temperature=0.6,
-                        max_completion_tokens=2048,
-                        top_p=0.95,
+                        temperature=1,
+                        max_completion_tokens=5071,
+                        top_p=1,
+                        reasoning_effort="low",
                         stream=False
                     )
                     break  # Успех — выходим из цикла попыток
