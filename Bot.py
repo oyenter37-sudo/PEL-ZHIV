@@ -2770,12 +2770,8 @@ def _draw_decorative_background(image: Image.Image):
         odraw.ellipse([cx - rad, cy - rad, cx + rad, cy + rad], fill=color)
     image.paste(Image.alpha_composite(image.convert("RGBA"), overlay).convert("RGB"))
 
-    # Тонкие рамки
-    draw = ImageDraw.Draw(image)
-    draw.rectangle([16, 16, width - 17, height - 17], outline=(255, 255, 255, 80), width=2)
-    draw.rectangle([24, 24, width - 25, height - 25], outline=(255, 200, 255, 50), width=1)
-
     # Уголковые украшения
+    draw = ImageDraw.Draw(image)
     corner_len = 40
     cc = (255, 220, 255)
     for cx, cy, dx, dy in [(20, 20, 1, 1), (width - 21, 20, -1, 1), (20, height - 21, 1, -1), (width - 21, height - 21, -1, -1)]:
@@ -2839,6 +2835,23 @@ def _draw_watermark_tile(image: Image.Image):
 
     # Композитим поверх картинки
     image.paste(Image.alpha_composite(image.convert("RGBA"), overlay).convert("RGB"))
+
+
+def _draw_frame(image: Image.Image):
+    """Рисует рамку поверх всего (после водянки)."""
+    width, height = image.size
+    draw = ImageDraw.Draw(image)
+
+    # Двойная рамка
+    draw.rectangle([12, 12, width - 13, height - 13], outline=(255, 255, 255), width=3)
+    draw.rectangle([20, 20, width - 21, height - 21], outline=(200, 170, 255), width=1)
+
+    # Уголковые украшения
+    corner_len = 45
+    cc = (255, 220, 255)
+    for cx, cy, dx, dy in [(16, 16, 1, 1), (width - 17, 16, -1, 1), (16, height - 17, 1, -1), (width - 17, height - 17, -1, -1)]:
+        draw.line([(cx, cy), (cx + corner_len * dx, cy)], fill=cc, width=3)
+        draw.line([(cx, cy), (cx, cy + corner_len * dy)], fill=cc, width=3)
 
 
 @router.message(UserStates.image_test_text)
@@ -2911,6 +2924,9 @@ async def image_test_generate(message: Message, state: FSMContext):
             draw.text((x, current_y), line, fill=(255, 255, 255), font=font)
 
             current_y += line_heights[i] + line_spacing
+
+        # Рамка поверх всего
+        _draw_frame(image)
 
         bio = io.BytesIO()
         image.save(bio, 'PNG')
