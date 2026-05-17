@@ -456,6 +456,21 @@ async def init_db():
             )
         ''')
         
+        # Банк: вклады
+        await db.execute('''
+            CREATE TABLE IF NOT EXISTS bank_deposits (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                deposit_type TEXT NOT NULL,
+                amount INTEGER NOT NULL,
+                accrued INTEGER DEFAULT 0,
+                opened_at TEXT NOT NULL,
+                unlock_at TEXT DEFAULT NULL,
+                is_locked INTEGER DEFAULT 0,
+                status TEXT DEFAULT 'active'
+            )
+        ''')
+
         # 2. МИГРАЦИЯ (ДОБАВЛЕНИЕ КОЛОНОК)
         new_columns = [
             ("users", "player_number", "INTEGER"),
@@ -1019,6 +1034,10 @@ class MiningStates(StatesGroup):
     # Покупка комплектующих
     waiting_buy_qty = State()
 
+class BankStates(StatesGroup):
+    # Открытие вклада — ввод суммы
+    waiting_deposit_amount = State()
+
 # =====================================
 # 🦔 ГОВОРЯЩИЙ ЕЖ - ЧАСТЬ 2/5 🦔
 # =====================================
@@ -1193,6 +1212,66 @@ def mining_keyboard():
     ])
 
 
+# =====================================
+# 🏦 КЛАВИАТУРЫ БАНКА
+# =====================================
+
+BANK_DEPOSIT_TYPES = {
+    "demand": {
+        "name": "🐾 До востребования",
+        "rate": 0.5,       # %/сут
+        "lock_hours": 0,   # бессрочно
+        "min_amount": 10,
+        "description": "Снятие в любой момент без штрафа"
+    },
+    "stable": {
+        "name": "🦔 Стабильный",
+        "rate": 1.2,
+        "lock_hours": 24,
+        "min_amount": 50,
+        "description": "Заморозка 24ч, выше ставка"
+    },
+    "premium": {
+        "name": "🏆 Премиум",
+        "rate": 2.0,
+        "lock_hours": 72,
+        "min_amount": 500,
+        "description": "Заморозка 72ч, максимальная ставка"
+    }
+}
+BANK_MAX_DEPOSIT = 100000  # Макс. сумма на одном вкладе
+BANK_EARLY_PENALTY = 0.10  # 10% штраф за досрочное снятие
+BANK_INTEREST_TAX = 0.05   # 5% налог на процент
+
+def bank_keyboard():
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="💰 Открыть вклад", callback_data="bank_open", style=ButtonStyle.SUCCESS)],
+        [InlineKeyboardButton(text="📋 Мои вклады", callback_data="bank_my_deposits")],
+        [InlineKeyboardButton(text="ℹ️ Информация", callback_data="bank_info")],
+        [InlineKeyboardButton(text="Назад ◀️◀️◀️", callback_data="finances")]
+    ])
+
+def bank_deposit_type_keyboard():
+    buttons = []
+    for dtype, info in BANK_DEPOSIT_TYPES.items():
+        lock_txt = f" (заморозка {info['lock_hours']}ч)" if info['lock_hours'] > 0 else " (бессрочно)"
+        buttons.append([InlineKeyboardButton(
+            text=f"{info['name']} — {info['rate']}%/сут{lock_txt}",
+            callback_data=f"bank_select_{dtype}"
+        )])
+    buttons.append([InlineKeyboardButton(text="Назад ◀️◀️◀️", callback_data="bank")])
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+def bank_deposit_actions_keyboard(deposit_id: int, can_withdraw: bool, is_locked: bool):
+    buttons = []
+    if can_withdraw:
+        buttons.append([InlineKeyboardButton(text="💰 Снять вклад", callback_data=f"bank_withdraw_{deposit_id}", style=ButtonStyle.SUCCESS)])
+    elif is_locked:
+        buttons.append([InlineKeyboardButton(text=f"⚠️ Снять досрочно (штраф {int(BANK_EARLY_PENALTY*100)}%)", callback_data=f"bank_early_{deposit_id}", style=ButtonStyle.DANGER)])
+    buttons.append([InlineKeyboardButton(text="Назад ◀️◀️◀️", callback_data="bank_my_deposits")])
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+
 def injured_keyboard():
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="🛒 В магазин!", callback_data="shop")],
@@ -1246,6 +1325,7 @@ def finances_keyboard():
         ],
         [InlineKeyboardButton(text="🏆 Топ по рефералам", callback_data="top_referrals")],
         [InlineKeyboardButton(text="🐜 Муравьишки!", callback_data="ants")],
+        [InlineKeyboardButton(text="🏦 Банк", callback_data="bank", style=ButtonStyle.PRIMARY)],
         [InlineKeyboardButton(text="Назад ◀️◀️◀️", callback_data="menu")]
     ])
 
@@ -2303,7 +2383,20 @@ async def reply_menu(message: Message, state: FSMContext):
     try:
         text = f"Привет! 👋🦔\nТвой номер игрока: {format_player_number(user['player_number'])}"
         await message.answer(text, reply_markup=main_reply_keyboard(is_user_admin, is_fake))
-        await message.answer("Вот меню бота:", reply_markup=main_menu_keyboard(is_user_admin))
+        # Проверяем медиа для экрана menu
+        media_info = await get_screen_media("menu")
+        if media_info:
+            try:
+                if media_info['media_type'] == 'photo':
+                    await message.answer_photo(media_info['file_id'], caption="Вот меню бота:", reply_markup=main_menu_keyboard(is_user_admin))
+                elif media_info['media_type'] == 'video':
+                    await message.answer_video(media_info['file_id'], caption="Вот меню бота:", reply_markup=main_menu_keyboard(is_user_admin))
+                else:
+                    await message.answer("Вот меню бота:", reply_markup=main_menu_keyboard(is_user_admin))
+            except Exception:
+                await message.answer("Вот меню бота:", reply_markup=main_menu_keyboard(is_user_admin))
+        else:
+            await message.answer("Вот меню бота:", reply_markup=main_menu_keyboard(is_user_admin))
     except Exception:
         try:
             await message.answer("Вот меню бота:", reply_markup=main_menu_keyboard(is_user_admin))
@@ -9291,6 +9384,396 @@ async def inline_query_handler(query: InlineQuery):
         await query.answer([result], cache_time=300)
 
 # =====================================
+# 🏦 БАНК «ЁЖ-ФИНАНС»
+# =====================================
+
+@router.callback_query(F.data == "bank")
+async def bank_menu(callback: CallbackQuery, state: FSMContext):
+    await state.clear()
+    if not await check_access(bot, callback.from_user.id, callback):
+        return
+    
+    user = await get_user(callback.from_user.id)
+    if not user:
+        await callback.answer("❌ Нажмите /start сначала!", show_alert=True)
+        return
+    
+    # Считаем сколько на вкладах
+    async with aiosqlite.connect(DB_NAME) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute("SELECT SUM(amount) as total, SUM(accrued) as total_accrued FROM bank_deposits WHERE user_id = ? AND status = 'active'", (callback.from_user.id,)) as cursor:
+            row = await cursor.fetchone()
+    
+    total_deposited = row['total'] if row and row['total'] else 0
+    total_accrued = row['total_accrued'] if row and row['total_accrued'] else 0
+    
+    text = (
+        f"🏦 **Банк «Ёж-Финанс»**\n\n"
+        f"💰 Ваш баланс: {user['balance']} Ежидзиков\n"
+        f"📦 На вкладах: {total_deposited} Ежидзиков\n"
+        f"📈 Начислено: +{total_accrued} Ежидзиков\n\n"
+        f"Кладите Ежидзики под процент и получайте доход!"
+    )
+    
+    await safe_edit_text(callback.message, text, reply_markup=bank_keyboard(), parse_mode="Markdown")
+
+
+@router.callback_query(F.data == "bank_info")
+async def bank_info(callback: CallbackQuery):
+    text = (
+        "🏦 **Информация о банке**\n\n"
+        "**Виды вкладов:**\n\n"
+        "🐾 **До востребования**\n"
+        "• Ставка: 0.5%/сут\n"
+        "• Мин. сумма: 10 ЕЖ\n"
+        "• Снятие в любой момент\n"
+        "• Штрафа нет\n\n"
+        "🦔 **Стабильный**\n"
+        "• Ставка: 1.2%/сут\n"
+        "• Мин. сумма: 50 ЕЖ\n"
+        "• Заморозка: 24 часа\n"
+        "• Досрочное снятие: штраф 10%\n\n"
+        "🏆 **Премиум**\n"
+        "• Ставка: 2%/сут\n"
+        "• Мин. сумма: 500 ЕЖ\n"
+        "• Заморозка: 72 часа\n"
+        "• Досрочное снятие: штраф 10%\n\n"
+        "**Общие правила:**\n"
+        f"• Макс. сумма вклада: {BANK_MAX_DEPOSIT:,} ЕЖ\n"
+        "• 1 активный вклад каждого типа на человека\n"
+        "• Процент начисляется на базовую сумму\n"
+        "• Начисление каждый час (пропорционально)\n"
+        f"• Налог на процент: {int(BANK_INTEREST_TAX*100)}%\n"
+        f"• Штраф за досрочное снятие: {int(BANK_EARLY_PENALTY*100)}%\n"
+    )
+    await safe_edit_text(callback.message, text, reply_markup=back_button("bank"), parse_mode="Markdown")
+
+
+@router.callback_query(F.data == "bank_open")
+async def bank_open_menu(callback: CallbackQuery):
+    if not await check_access(bot, callback.from_user.id, callback):
+        return
+    
+    user = await get_user(callback.from_user.id)
+    if not user:
+        await callback.answer("❌ Нажмите /start сначала!", show_alert=True)
+        return
+    
+    # Проверяем какие типы уже открыты
+    async with aiosqlite.connect(DB_NAME) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute("SELECT deposit_type FROM bank_deposits WHERE user_id = ? AND status = 'active'", (callback.from_user.id,)) as cursor:
+            active = [r['deposit_type'] for r in await cursor.fetchall()]
+    
+    available = {k: v for k, v in BANK_DEPOSIT_TYPES.items() if k not in active}
+    
+    if not available:
+        await callback.answer("❌ У вас уже есть все виды вкладов!", show_alert=True)
+        return
+    
+    text = (
+        f"💰 Открыть вклад\n\n"
+        f"Ваш баланс: {user['balance']} Ежидзиков\n\n"
+        "Выберите тип вклада:"
+    )
+    
+    buttons = []
+    for dtype, info in available.items():
+        lock_txt = f" (заморозка {info['lock_hours']}ч)" if info['lock_hours'] > 0 else " (бессрочно)"
+        buttons.append([InlineKeyboardButton(
+            text=f"{info['name']} — {info['rate']}%/сут{lock_txt}",
+            callback_data=f"bank_select_{dtype}"
+        )])
+    buttons.append([InlineKeyboardButton(text="Назад ◀️◀️◀️", callback_data="bank")])
+    
+    await safe_edit_text(callback.message, text, reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons))
+
+
+@router.callback_query(F.data.startswith("bank_select_"))
+async def bank_select_deposit_type(callback: CallbackQuery, state: FSMContext):
+    dtype = callback.data.replace("bank_select_", "")
+    if dtype not in BANK_DEPOSIT_TYPES:
+        await callback.answer("❌ Неизвестный тип вклада!", show_alert=True)
+        return
+    
+    info = BANK_DEPOSIT_TYPES[dtype]
+    user = await get_user(callback.from_user.id)
+    if not user:
+        await callback.answer("❌ Нажмите /start сначала!", show_alert=True)
+        return
+    
+    lock_txt = f"Заморозка: {info['lock_hours']}ч" if info['lock_hours'] > 0 else "Снятие в любой момент"
+    
+    text = (
+        f"{info['name']}\n\n"
+        f"📊 Ставка: {info['rate']}%/сут\n"
+        f"🔒 {lock_txt}\n"
+        f"💵 Мин. сумма: {info['min_amount']} ЕЖ\n"
+        f"📦 Макс. сумма: {BANK_MAX_DEPOSIT:,} ЕЖ\n\n"
+        f"💰 Ваш баланс: {user['balance']} ЕЖ\n\n"
+        f"Введите сумму вклада:"
+    )
+    
+    await state.update_data(deposit_type=dtype)
+    await state.set_state(BankStates.waiting_deposit_amount)
+    
+    buttons = [[InlineKeyboardButton(text="❌ Отмена", callback_data="bank_open")]]
+    await safe_edit_text(callback.message, text, reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons))
+
+
+@router.message(BankStates.waiting_deposit_amount)
+async def bank_process_deposit(message: Message, state: FSMContext):
+    data = await state.get_data()
+    dtype = data.get('deposit_type')
+    await state.clear()
+    
+    if not dtype or dtype not in BANK_DEPOSIT_TYPES:
+        await message.answer("❌ Ошибка, попробуйте снова.")
+        return
+    
+    info = BANK_DEPOSIT_TYPES[dtype]
+    
+    # Парсим сумму
+    try:
+        amount = int(message.text.strip().replace(' ', '').replace(',', ''))
+    except ValueError:
+        await message.answer("❌ Введите целое число!", reply_markup=back_button("bank_open"))
+        return
+    
+    if amount < info['min_amount']:
+        await message.answer(f"❌ Минимальная сумма для этого вклада: {info['min_amount']} ЕЖ", reply_markup=back_button("bank_open"))
+        return
+    
+    if amount > BANK_MAX_DEPOSIT:
+        await message.answer(f"❌ Максимальная сумма вклада: {BANK_MAX_DEPOSIT:,} ЕЖ", reply_markup=back_button("bank_open"))
+        return
+    
+    user = await get_user(message.from_user.id)
+    if not user or user['balance'] < amount:
+        await message.answer("❌ Недостаточно Ежидзиков!", reply_markup=back_button("bank_open"))
+        return
+    
+    # Проверяем что такого типа ещё нет
+    async with aiosqlite.connect(DB_NAME) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute("SELECT id FROM bank_deposits WHERE user_id = ? AND deposit_type = ? AND status = 'active'", (message.from_user.id, dtype)) as cursor:
+            existing = await cursor.fetchone()
+        if existing:
+            await message.answer("❌ У вас уже есть активный вклад этого типа!", reply_markup=back_button("bank"))
+            return
+        
+        # Списываем деньги
+        await db.execute("UPDATE users SET balance = balance - ? WHERE user_id = ?", (amount, message.from_user.id))
+        
+        now = datetime.now()
+        unlock_at = None
+        is_locked = 0
+        if info['lock_hours'] > 0:
+            unlock_at = (now + timedelta(hours=info['lock_hours'])).strftime("%Y-%m-%d %H:%M:%S")
+            is_locked = 1
+        
+        await db.execute(
+            "INSERT INTO bank_deposits (user_id, deposit_type, amount, accrued, opened_at, unlock_at, is_locked, status) VALUES (?, ?, ?, 0, ?, ?, ?, 'active')",
+            (message.from_user.id, dtype, amount, now.strftime("%Y-%m-%d %H:%M:%S"), unlock_at, is_locked)
+        )
+        await db.commit()
+    
+    lock_txt = f"\n🔒 Разблокировка: {unlock_at}" if unlock_at else "\n🔓 Снятие в любой момент"
+    await message.answer(
+        f"✅ Вклад открыт!\n\n"
+        f"{info['name']}\n"
+        f"💵 Сумма: {amount} ЕЖ\n"
+        f"📊 Ставка: {info['rate']}%/сут"
+        f"{lock_txt}",
+        reply_markup=back_button("bank")
+    )
+
+
+@router.callback_query(F.data == "bank_my_deposits")
+async def bank_my_deposits(callback: CallbackQuery):
+    if not await check_access(bot, callback.from_user.id, callback):
+        return
+    
+    async with aiosqlite.connect(DB_NAME) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute("SELECT * FROM bank_deposits WHERE user_id = ? AND status = 'active' ORDER BY opened_at", (callback.from_user.id,)) as cursor:
+            deposits = await cursor.fetchall()
+    
+    if not deposits:
+        await safe_edit_text(callback.message, "📋 У вас нет активных вкладов.", reply_markup=back_button("bank"))
+        return
+    
+    buttons = []
+    for dep in deposits:
+        info = BANK_DEPOSIT_TYPES.get(dep['deposit_type'], {})
+        name = info.get('name', dep['deposit_type'])
+        lock_icon = "🔒" if dep['is_locked'] else "🔓"
+        buttons.append([InlineKeyboardButton(
+            text=f"{lock_icon} {name} — {dep['amount']} ЕЖ (+{dep['accrued']})",
+            callback_data=f"bank_view_{dep['id']}"
+        )])
+    buttons.append([InlineKeyboardButton(text="Назад ◀️◀️◀️", callback_data="bank")])
+    
+    await safe_edit_text(callback.message, "📋 **Ваши вклады:**", reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons), parse_mode="Markdown")
+
+
+@router.callback_query(F.data.startswith("bank_view_"))
+async def bank_view_deposit(callback: CallbackQuery):
+    if not await check_access(bot, callback.from_user.id, callback):
+        return
+    
+    dep_id = int(callback.data.replace("bank_view_", ""))
+    
+    async with aiosqlite.connect(DB_NAME) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute("SELECT * FROM bank_deposits WHERE id = ? AND user_id = ?", (dep_id, callback.from_user.id)) as cursor:
+            dep = await cursor.fetchone()
+    
+    if not dep or dep['status'] != 'active':
+        await callback.answer("❌ Вклад не найден!", show_alert=True)
+        return
+    
+    info = BANK_DEPOSIT_TYPES.get(dep['deposit_type'], {})
+    name = info.get('name', dep['deposit_type'])
+    rate = info.get('rate', 0)
+    
+    # Проверяем разблокирован ли
+    now = datetime.now()
+    is_locked = dep['is_locked']
+    can_withdraw = not is_locked
+    
+    if is_locked and dep['unlock_at']:
+        unlock_dt = datetime.strptime(dep['unlock_at'], "%Y-%m-%d %H:%M:%S")
+        if now >= unlock_dt:
+            can_withdraw = True
+            is_locked = False
+    
+    # Считаем примерный доход за сутки
+    daily_income = int(dep['amount'] * rate / 100 * (1 - BANK_INTEREST_TAX))
+    
+    lock_txt = ""
+    if dep['is_locked'] and dep['unlock_at']:
+        unlock_dt = datetime.strptime(dep['unlock_at'], "%Y-%m-%d %H:%M:%S")
+        remaining = unlock_dt - now
+        if remaining.total_seconds() > 0:
+            hours_left = int(remaining.total_seconds() / 3600)
+            mins_left = int((remaining.total_seconds() % 3600) / 60)
+            lock_txt = f"\n🔒 Заморожен ещё: {hours_left}ч {mins_left}м"
+        else:
+            lock_txt = "\n🔓 Разблокирован! Можно снять"
+    else:
+        lock_txt = "\n🔓 Можно снять в любой момент"
+    
+    penalty_txt = ""
+    if is_locked and not can_withdraw:
+        penalty = int(dep['amount'] * BANK_EARLY_PENALTY)
+        penalty_txt = f"\n⚠️ Штраф за досрочное снятие: {penalty} ЕЖ"
+    
+    text = (
+        f"🏦 **{name}**\n\n"
+        f"💵 Сумма вклада: {dep['amount']} ЕЖ\n"
+        f"📈 Начислено: +{dep['accrued']} ЕЖ\n"
+        f"📊 Ставка: {rate}%/сут\n"
+        f"💰 Доход в сутки: ~{daily_income} ЕЖ\n"
+        f"📅 Открыт: {dep['opened_at']}"
+        f"{lock_txt}"
+        f"{penalty_txt}"
+    )
+    
+    await safe_edit_text(callback.message, text, reply_markup=bank_deposit_actions_keyboard(dep_id, can_withdraw, is_locked and not can_withdraw), parse_mode="Markdown")
+
+
+@router.callback_query(F.data.startswith("bank_withdraw_"))
+async def bank_withdraw_deposit(callback: CallbackQuery):
+    """Снять вклад (без штрафа — срок прошёл или до востребования)"""
+    if not await check_access(bot, callback.from_user.id, callback):
+        return
+    
+    dep_id = int(callback.data.replace("bank_withdraw_", ""))
+    
+    async with aiosqlite.connect(DB_NAME) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute("SELECT * FROM bank_deposits WHERE id = ? AND user_id = ? AND status = 'active'", (dep_id, callback.from_user.id)) as cursor:
+            dep = await cursor.fetchone()
+        
+        if not dep:
+            await callback.answer("❌ Вклад не найден!", show_alert=True)
+            return
+        
+        # Проверяем что можно снять
+        if dep['is_locked'] and dep['unlock_at']:
+            unlock_dt = datetime.strptime(dep['unlock_at'], "%Y-%m-%d %H:%M:%S")
+            if datetime.now() < unlock_dt:
+                await callback.answer("❌ Вклад ещё заморожен! Используйте досрочное снятие.", show_alert=True)
+                return
+        
+        total = dep['amount'] + dep['accrued']
+        
+        await db.execute("UPDATE users SET balance = balance + ? WHERE user_id = ?", (total, callback.from_user.id))
+        await db.execute("UPDATE bank_deposits SET status = 'withdrawn' WHERE id = ?", (dep_id,))
+        await db.commit()
+    
+    info = BANK_DEPOSIT_TYPES.get(dep['deposit_type'], {})
+    name = info.get('name', dep['deposit_type'])
+    
+    await safe_edit_text(
+        callback.message,
+        f"✅ Вклад снят!\n\n"
+        f"🏦 {name}\n"
+        f"💵 Вклад: {dep['amount']} ЕЖ\n"
+        f"📈 Начислено: +{dep['accrued']} ЕЖ\n"
+        f"💰 Итого получено: {total} ЕЖ",
+        reply_markup=back_button("bank")
+    )
+
+
+@router.callback_query(F.data.startswith("bank_early_"))
+async def bank_early_withdraw(callback: CallbackQuery):
+    """Досрочное снятие со штрафом"""
+    if not await check_access(bot, callback.from_user.id, callback):
+        return
+    
+    dep_id = int(callback.data.replace("bank_early_", ""))
+    
+    async with aiosqlite.connect(DB_NAME) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute("SELECT * FROM bank_deposits WHERE id = ? AND user_id = ? AND status = 'active'", (dep_id, callback.from_user.id)) as cursor:
+            dep = await cursor.fetchone()
+        
+        if not dep:
+            await callback.answer("❌ Вклад не найден!", show_alert=True)
+            return
+        
+        if not dep['is_locked']:
+            await callback.answer("❌ Этот вклад не заморожен, снимайте обычным способом!", show_alert=True)
+            return
+        
+        # Штраф: 10% от базовой суммы
+        penalty = int(dep['amount'] * BANK_EARLY_PENALTY)
+        total_back = dep['amount'] - penalty + dep['accrued']
+        if total_back < 0:
+            total_back = 0
+        
+        await db.execute("UPDATE users SET balance = balance + ? WHERE user_id = ?", (total_back, callback.from_user.id))
+        await db.execute("UPDATE bank_deposits SET status = 'early_withdrawn' WHERE id = ?", (dep_id,))
+        await db.commit()
+    
+    info = BANK_DEPOSIT_TYPES.get(dep['deposit_type'], {})
+    name = info.get('name', dep['deposit_type'])
+    
+    await safe_edit_text(
+        callback.message,
+        f"⚠️ Досрочное снятие вклада\n\n"
+        f"🏦 {name}\n"
+        f"💵 Вклад: {dep['amount']} ЕЖ\n"
+        f"📈 Начислено: +{dep['accrued']} ЕЖ\n"
+        f"❌ Штраф ({int(BANK_EARLY_PENALTY*100)}%): -{penalty} ЕЖ\n"
+        f"💰 Итого получено: {total_back} ЕЖ",
+        reply_markup=back_button("bank")
+    )
+
+
+# =====================================
 # ⏰ ФОНОВЫЕ ЗАДАЧИ
 # =====================================
 
@@ -9400,6 +9883,40 @@ async def mining_loop():
         await asyncio.sleep(3600)
 
 
+async def bank_interest_loop():
+    """Начисление процентов по вкладам — раз в час."""
+    while True:
+        try:
+            async with aiosqlite.connect(DB_NAME) as db:
+                db.row_factory = aiosqlite.Row
+                async with db.execute("SELECT * FROM bank_deposits WHERE status = 'active'") as cursor:
+                    deposits = await cursor.fetchall()
+                
+                for dep in deposits:
+                    info = BANK_DEPOSIT_TYPES.get(dep['deposit_type'])
+                    if not info:
+                        continue
+                    
+                    # Процент за час = (суточная_ставка / 24)
+                    hourly_rate = info['rate'] / 24 / 100  # доля от суммы за 1 час
+                    interest = dep['amount'] * hourly_rate
+                    
+                    # Налог 5%
+                    tax = interest * BANK_INTEREST_TAX
+                    net_interest = interest - tax
+                    
+                    # Округляем до целых (минимум 0)
+                    net_int = max(0, int(net_interest))
+                    
+                    if net_int > 0:
+                        await db.execute("UPDATE bank_deposits SET accrued = accrued + ? WHERE id = ?", (net_int, dep['id']))
+                
+                await db.commit()
+        except Exception as e:
+            print(f"Ошибка начисления процентов банка: {e}")
+        await asyncio.sleep(3600)
+
+
 async def hunger_loop():
     # Реализация механики выживания v3.8
     # Еж умирает за 3 дня (72 часа) = 100% сытости.
@@ -9493,6 +10010,7 @@ async def main():
         # Start background tasks
         asyncio.create_task(ant_income_loop())
         asyncio.create_task(mining_loop())
+        asyncio.create_task(bank_interest_loop())
         asyncio.create_task(hunger_loop())
         
         print("=" * 50)
