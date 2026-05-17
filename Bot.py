@@ -25,7 +25,7 @@ from aiogram.filters import CommandStart, Command, CommandObject, StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.storage.memory import MemoryStorage
-from aiogram.enums import ChatMemberStatus, ButtonStyle
+from aiogram.enums import ChatMemberStatus, ButtonStyle, ChatAction
 
 # Попытка импорта Pillow для Image Test
 try:
@@ -4418,6 +4418,24 @@ async def ai_chat_message(message: Message, state: FSMContext):
     # Списываем Ежидзики
     await update_balance(user_id, -AI_CHAT_COST)
     
+    # Статус «печатает» — отправляем и обновляем в фоне
+    await bot.send_chat_action(chat_id=message.chat.id, action=ChatAction.TYPING)
+    typing_stop = asyncio.Event()
+    
+    async def typing_loop():
+        """Обновляем статус 'печатает' каждые 4 секунды, пока ёж думает."""
+        while not typing_stop.is_set():
+            try:
+                await bot.send_chat_action(chat_id=message.chat.id, action=ChatAction.TYPING)
+            except Exception:
+                pass
+            try:
+                await asyncio.wait_for(typing_stop.wait(), timeout=4.0)
+            except asyncio.TimeoutError:
+                continue
+    
+    typing_task = asyncio.create_task(typing_loop())
+    
     # Загружаем историю из FSM
     data = await state.get_data()
     ai_history = data.get("ai_history", [])
@@ -4530,6 +4548,14 @@ async def ai_chat_message(message: Message, state: FSMContext):
         # Возвращаем Ежидзики при ошибке — игрок не виноват
         await update_balance(user_id, AI_CHAT_COST)
         final_response = "Фыр-фыр... *шуршит иголками* Связь оборвалась! Ежидзики возвращены 💰 Попробуй ещё раз! 📞🦔"
+    
+    # Останавливаем статус «печатает»
+    typing_stop.set()
+    typing_task.cancel()
+    try:
+        await typing_task
+    except asyncio.CancelledError:
+        pass
     
     # Сохраняем в историю
     ai_history.append({"user": text, "assistant": final_response})
