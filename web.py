@@ -725,12 +725,13 @@ async def _start_cloudflare_tunnel():
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
-        # Читаем stderr чтобы вытащить URL (с общим таймаутом 15 сек)
+        # Читаем stderr чтобы вытащить URL (ждём до 45 секунд)
         url_found = None
         try:
-            for _ in range(30):  # до 30 строк
-                line = await asyncio.wait_for(proc.stderr.readline(), timeout=2)
+            for _ in range(45):  # до 45 строк
+                line = await asyncio.wait_for(proc.stderr.readline(), timeout=5)
                 line = line.decode("utf-8", errors="ignore")
+                # Ищем URL в формате trycloudflare.com
                 match = re.search(r'https://[a-z0-9\-]+\.trycloudflare\.com', line)
                 if match:
                     url_found = match.group(0)
@@ -744,6 +745,6 @@ async def _start_cloudflare_tunnel():
             PUBLIC_URL = url_found
             print(f"🌐 Публичный URL: {PUBLIC_URL}")
         else:
-            print("⚠️ Не удалось получить URL туннеля за 15 сек")
+            print("⚠️ Не удалось получить URL туннеля за 45 сек")
     except Exception as e:
         print(f"⚠️ Ошибка запуска cloudflared: {e}")

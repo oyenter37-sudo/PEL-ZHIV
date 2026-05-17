@@ -4000,17 +4000,27 @@ async def process_transfer_amount(message: Message, state: FSMContext):
 @router.callback_query(F.data == "website")
 async def website_info(callback: CallbackQuery):
     from web import PUBLIC_URL
-    site_url = PUBLIC_URL or "http://localhost:8080"
-    text = (
-        "🌐 **Официальный сайт Говорящего Ежа**\n\n"
-        "На сайте можно посмотреть статистику своего ежа, финансы, вклады и многое другое — в красивом интерфейсе!\n\n"
-        "🔑 Сначала получите ключ входа (кнопка ниже), затем введите его на сайте."
-    )
-    kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🌐 Открыть сайт", url=site_url)],
-        [InlineKeyboardButton(text="🔑 Получить ключ входа", callback_data="web_key")],
-        [InlineKeyboardButton(text="◀️ Назад", callback_data="menu")]
-    ])
+    if PUBLIC_URL:
+        text = (
+            "🌐 **Официальный сайт Говорящего Ежа**\n\n"
+            "На сайте можно посмотреть статистику своего ежа, финансы, вклады и многое другое — в красивом интерфейсе!\n\n"
+            "🔑 Сначала получите ключ входа (кнопка ниже), затем введите его на сайте."
+        )
+        kb = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="🌐 Открыть сайт", url=PUBLIC_URL)],
+            [InlineKeyboardButton(text="🔑 Получить ключ входа", callback_data="web_key")],
+            [InlineKeyboardButton(text="◀️ Назад", callback_data="menu")]
+        ])
+    else:
+        text = (
+            "🌐 **Официальный сайт Говорящего Ежа**\n\n"
+            "⚠️ Сайт временно недоступен (туннель не подключён)\n\n"
+            "Получите ключ входа — когда сайт будет доступен, вы сможете войти."
+        )
+        kb = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="🔑 Получить ключ входа", callback_data="web_key")],
+            [InlineKeyboardButton(text="◀️ Назад", callback_data="menu")]
+        ])
     await safe_edit_text(callback.message, text, reply_markup=kb, parse_mode="Markdown")
 
 @router.callback_query(F.data == "web_key")
@@ -4018,20 +4028,33 @@ async def web_key_generate(callback: CallbackQuery):
     from web import generate_web_key, PUBLIC_URL
     user_id = callback.from_user.id
     key = await generate_web_key(user_id)
-    site_url = PUBLIC_URL or "http://localhost:8080"
-    text = (
-        "🔑 **Ключ входа на сайт**\n\n"
-        f"`{key}`\n\n"
-        "⏱ Действителен 1 час\n"
-        "🔗 Нажмите «Скопировать» ниже, затем вставьте ключ на сайте\n\n"
-        "⚠️ Не передавайте ключ другим!"
-    )
-    kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="📋 Скопировать", copy_text=CopyTextButton(text=key))],
-        [InlineKeyboardButton(text="🌐 Открыть сайт", url=site_url)],
-        [InlineKeyboardButton(text="🔄 Новый ключ", callback_data="web_key")],
-        [InlineKeyboardButton(text="◀️ Назад", callback_data="menu")]
-    ])
+    if PUBLIC_URL:
+        text = (
+            "🔑 **Ключ входа на сайт**\n\n"
+            f"`{key}`\n\n"
+            "⏱ Действителен 1 час\n"
+            "🔗 Нажмите «Скопировать» ниже, затем вставьте ключ на сайте\n\n"
+            "⚠️ Не передавайте ключ другим!"
+        )
+        kb = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="📋 Скопировать", copy_text=CopyTextButton(text=key))],
+            [InlineKeyboardButton(text="🌐 Открыть сайт", url=PUBLIC_URL)],
+            [InlineKeyboardButton(text="🔄 Новый ключ", callback_data="web_key")],
+            [InlineKeyboardButton(text="◀️ Назад", callback_data="menu")]
+        ])
+    else:
+        text = (
+            "🔑 **Ключ входа на сайт**\n\n"
+            f"`{key}`\n\n"
+            "⏱ Действителен 1 час\n"
+            "⚠️ Сайт временно недоступен, но ключ сохранён. Когда сайт заработает — вы сможете войти.\n\n"
+            "⚠️ Не передавайте ключ другим!"
+        )
+        kb = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="📋 Скопировать", copy_text=CopyTextButton(text=key))],
+            [InlineKeyboardButton(text="🔄 Новый ключ", callback_data="web_key")],
+            [InlineKeyboardButton(text="◀️ Назад", callback_data="menu")]
+        ])
     await safe_edit_text(callback.message, text, reply_markup=kb, parse_mode="Markdown")
 
 # =====================================
