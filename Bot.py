@@ -50,7 +50,7 @@ GROQ_API_KEY = os.environ.get("GROQ_API_KEY", "")
 AI_CHAT_COST = 10  # Стоимость одного сообщения в Ежидзиках
 AI_HISTORY_LIMIT = 3  # Запоминать последние N пар сообщений
 
-groq_client = Groq(api_key=GROQ_API_KEY)
+groq_client = Groq(api_key=GROQ_API_KEY, timeout=60.0)
 
 AI_HEDGEHOG_SYSTEM = """Ты — Говорящий Еж 🦔, милый колючий помощник в боте «Говорящий Еж». Отвечай мило, с фырканьем (фыр-фыр), иногда сворачиваясь в клубок 🦔
 
@@ -4481,7 +4481,7 @@ async def ai_chat_message(message: Message, state: FSMContext):
                     last_error = api_err
                     err_msg = str(api_err).lower()
                     # Повторяем только при ошибках соединения
-                    if any(kw in err_msg for kw in ['connection', 'timeout', 'network', 'read error', 'reset', '502', '503', '504']):
+                    if any(kw in err_msg for kw in ['connection', 'timeout', 'timed out', 'network', 'read error', 'reset', '502', '503', '504']):
                         wait = 1.5 * (attempt + 1)  # 1.5с, 3с, 4.5с
                         print(f"⚠️ Попытка {attempt+1}/{api_retries} ошибка: {api_err}. Жду {wait}с...")
                         await asyncio.sleep(wait)
