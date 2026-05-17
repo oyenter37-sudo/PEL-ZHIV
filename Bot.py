@@ -2785,6 +2785,7 @@ def _draw_decorative_background(image: Image.Image):
 
 def _draw_watermark_tile(image: Image.Image):
     """Полупрозрачная плиточная водянка 'Говорящий ёж' по всей картинке с наклоном."""
+    import math
     width, height = image.size
 
     # Загружаем шрифт для водянки
@@ -2803,27 +2804,40 @@ def _draw_watermark_tile(image: Image.Image):
         wm_font = ImageFont.load_default()
 
     wm_text = "Говорящий ёж  "
-    # Размер одного тайла
-    tmp_draw = ImageDraw.Draw(Image.new("RGBA", (1, 1), (0, 0, 0, 0)))
-    bbox = tmp_draw.textbbox((0, 0), wm_text, font=wm_font)
-    tile_w = bbox[2] - bbox[0] + 40
-    tile_h = (bbox[3] - bbox[1]) + 40
 
-    # Создаём один тайл с текстом
-    tile = Image.new("RGBA", (tile_w, tile_h), (0, 0, 0, 0))
-    tdraw = ImageDraw.Draw(tile)
-    tdraw.text((20, 20), wm_text, fill=(255, 255, 255, 32), font=wm_font)
-
-    # Поворачиваем тайл на -30°
-    tile = tile.rotate(-30, resample=Image.BICUBIC, expand=True)
-
-    # Замощаем поверх картинки
+    # Рисуем водянку на RGBA оверлее полным белым, потом понизим альфу
     overlay = Image.new("RGBA", (width, height), (0, 0, 0, 0))
-    tw, th = tile.size
-    for y in range(-th, height + th, th):
-        for x in range(-tw, width + tw, tw):
-            overlay.paste(tile, (x, y), tile)
+    odraw = ImageDraw.Draw(overlay)
 
+    # Измеряем размер текста
+    bbox = odraw.textbbox((0, 0), wm_text, font=wm_font)
+    tw = bbox[2] - bbox[0]
+    th = bbox[3] - bbox[1]
+
+    spacing_x = tw + 60
+    spacing_y = th + 80
+
+    # Поворот позиций на -30°
+    angle_rad = math.radians(-30)
+    cos_a = math.cos(angle_rad)
+    sin_a = math.sin(angle_rad)
+
+    for row in range(-30, 40):
+        for col in range(-20, 25):
+            x = col * spacing_x
+            y = row * spacing_y
+            rx = x * cos_a - y * sin_a + width / 2
+            ry = x * sin_a + y * cos_a + height / 2
+            odraw.text((rx, ry), wm_text, fill=(255, 255, 255, 255), font=wm_font)
+
+    # Понижаем альфу всех непрозрачных пикселей до 60 (~23% прозрачности)
+    a_ch = overlay.getchannel("A")
+    # Создаём lookup table: 0→0, 1..255→60
+    lut = [0] + [60] * 255
+    a_ch = a_ch.point(lut)
+    overlay.putalpha(a_ch)
+
+    # Композитим поверх картинки
     image.paste(Image.alpha_composite(image.convert("RGBA"), overlay).convert("RGB"))
 
 
