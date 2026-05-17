@@ -1061,8 +1061,7 @@ def main_reply_keyboard(is_admin: bool = False, is_fake_admin: bool = False):
         [KeyboardButton(text="🏠 Меню", style=ButtonStyle.PRIMARY)],
         [KeyboardButton(text="🦔 Мой Ёж"), KeyboardButton(text="🌟 Финансы")],
         [KeyboardButton(text="🤔 Поддержка"), KeyboardButton(text="🎰 Ежино")],
-        [KeyboardButton(text="🧩 Пазл", style=ButtonStyle.PRIMARY)],
-        [KeyboardButton(text="Image Test")]
+        [KeyboardButton(text="🧩 Пазл", style=ButtonStyle.PRIMARY)]
     ]
     if is_admin or is_fake_admin:
         buttons.append([KeyboardButton(text="🛠 Панель", style=ButtonStyle.DANGER)])
@@ -1151,6 +1150,7 @@ def puzzle_keyboard():
         [InlineKeyboardButton(text="⚒️ Кузница", callback_data="forge", style=ButtonStyle.PRIMARY)],
         [InlineKeyboardButton(text="💻 Майнинг", callback_data="mining", style=ButtonStyle.PRIMARY)],
         [InlineKeyboardButton(text="🎰 Домашнее казино", callback_data="hc_casino", style=ButtonStyle.PRIMARY)],
+        [InlineKeyboardButton(text="🧪 Image Test", callback_data="image_test")],
         [InlineKeyboardButton(text="🤖 ИИ-ЕЖ", callback_data="stub_ai")],
         [InlineKeyboardButton(text="Назад ◀️◀️◀️", callback_data="menu")]
     ])
@@ -1586,7 +1586,8 @@ def transfer_keyboard():
 
 def image_test_keyboard():
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="❌ Отмена", callback_data="cancel_image_test")]
+        [InlineKeyboardButton(text="❌ Отмена", callback_data="cancel_image_test")],
+        [InlineKeyboardButton(text="◀️ Назад в пазл", callback_data="puzzle")]
     ])
 
 def class_select_keyboard():
@@ -2680,17 +2681,17 @@ async def admin_login_verify(callback: CallbackQuery, state: FSMContext):
 # 🧪 IMAGE TEST
 # =====================================
 
-@router.message(F.text == "Image Test")
-async def image_test_start(message: Message, state: FSMContext):
+@router.callback_query(F.data == "image_test")
+async def image_test_callback(callback: CallbackQuery, state: FSMContext):
     await state.clear()
-    if not await check_access(bot, message.from_user.id, message=message):
+    if not await check_access(bot, callback.from_user.id, callback):
         return
     if not HAS_PILLOW:
-        await message.answer("⚠️ Функция недоступна (нет библиотеки Pillow).")
+        await safe_edit_text(callback.message, "⚠️ Функция недоступна (нет библиотеки Pillow).", reply_markup=back_button("puzzle"))
         return
-        
+
     await state.set_state(UserStates.image_test_text)
-    await message.answer(
+    await callback.message.answer(
         "🧪 Image Test\n\nВведите текст, который нужно нарисовать на картинке:",
         reply_markup=image_test_keyboard()
     )
