@@ -4441,17 +4441,38 @@ async def ai_chat_message(message: Message, state: FSMContext):
         # Цикл обработки: вызов API → tool_calls → выполнение → повторный вызов
         max_iterations = 5
         final_response = None
+        api_retries = 3  # Количество попыток при ошибке соединения
         
         for _ in range(max_iterations):
-            completion = groq_client.chat.completions.create(
-                model="openai/gpt-oss-120b",
-                messages=api_messages,
-                tools=AI_TOOLS,
-                temperature=0.6,
-                max_completion_tokens=2048,
-                top_p=0.95,
-                stream=False
-            )
+            # Попытки вызова API с ретраями при Connection error
+            completion = None
+            last_error = None
+            for attempt in range(api_retries):
+                try:
+                    completion = groq_client.chat.completions.create(
+                        model="openai/gpt-oss-120b",
+                        messages=api_messages,
+                        tools=AI_TOOLS,
+                        temperature=0.6,
+                        max_completion_tokens=2048,
+                        top_p=0.95,
+                        stream=False
+                    )
+                    break  # Успех — выходим из цикла попыток
+                except Exception as api_err:
+                    last_error = api_err
+                    err_msg = str(api_err).lower()
+                    # Повторяем только при ошибках соединения
+                    if any(kw in err_msg for kw in ['connection', 'timeout', 'network', 'read error', 'reset', '502', '503', '504']):
+                        wait = 1.5 * (attempt + 1)  # 1.5с, 3с, 4.5с
+                        print(f"⚠️ Попытка {attempt+1}/{api_retries} ошибка: {api_err}. Жду {wait}с...")
+                        await asyncio.sleep(wait)
+                        continue
+                    else:
+                        raise  # Другие ошибки — пробрасываем сразу
+            
+            if completion is None:
+                raise last_error  # Все попытки исчерпаны
             
             choice = completion.choices[0]
             msg = choice.message
@@ -4506,7 +4527,9 @@ async def ai_chat_message(message: Message, state: FSMContext):
         
     except Exception as e:
         print(f"❌ Ошибка Groq API: {e}")
-        final_response = "Фыр-фыр... *шуршит иголками* Что-то связь плохая... Попробуй ещё раз! 📞🦔"
+        # Возвращаем Ежидзики при ошибке — игрок не виноват
+        await update_balance(user_id, AI_CHAT_COST)
+        final_response = "Фыр-фыр... *шуршит иголками* Связь оборвалась! Ежидзики возвращены 💰 Попробуй ещё раз! 📞🦔"
     
     # Сохраняем в историю
     ai_history.append({"user": text, "assistant": final_response})
