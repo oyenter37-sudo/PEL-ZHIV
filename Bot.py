@@ -11493,6 +11493,13 @@ async def main():
         asyncio.create_task(bank_interest_loop())
         asyncio.create_task(hunger_loop())
         
+        # Запуск бота Навального параллельно
+        try:
+            from navalnyy import run_navalnyy
+            asyncio.create_task(run_navalnyy())
+        except Exception as e:
+            print(f"⚠️ Бот Навального не запущен: {e}")
+        
         # Start web server (non-blocking!)
         try:
             from web import start_web_server
