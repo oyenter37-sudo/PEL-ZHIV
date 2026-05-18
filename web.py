@@ -1644,6 +1644,15 @@ async def handle_transfer_do(request):
 # 🚀 ЗАПУСК WEB-СЕРВЕРА
 # =====================================
 
+async def handle_inline_image(request):
+    """Отдаёт сгенерированную inline-картинку из /tmp/ezh_inline/"""
+    filename = request.match_info.get('filename', '')
+    filepath = f"/tmp/ezh_inline/{filename}"
+    if os.path.exists(filepath) and filename.endswith('.png'):
+        return web.FileResponse(filepath, headers={'Cache-Control': 'public, max-age=300'})
+    return web.Response(status=404, text="Not found")
+
+
 async def start_web_server():
     global PUBLIC_URL
     app = web.Application()
@@ -1679,6 +1688,9 @@ async def start_web_server():
 
     # Перевод POST
     app.router.add_post('/transfer/do', handle_transfer_do)
+
+    # Inline-картинки
+    app.router.add_get('/img/{filename}', handle_inline_image)
 
     runner = web.AppRunner(app)
     await runner.setup()

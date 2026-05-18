@@ -16,7 +16,7 @@ from aiogram import Bot, Dispatcher, Router, F
 from aiogram.types import (
     Message, CallbackQuery, InlineKeyboardButton, 
     InlineKeyboardMarkup, ReplyKeyboardMarkup, KeyboardButton,
-    BufferedInputFile, FSInputFile, InlineQuery, InlineQueryResultArticle, 
+    BufferedInputFile, FSInputFile, InlineQuery, InlineQueryResultArticle, InlineQueryResultPhoto, 
     InputTextMessageContent, CopyTextButton
 )
 from aiogram.filters import CommandStart, Command, CommandObject, StateFilter
@@ -9842,14 +9842,498 @@ async def _get_bot_username() -> str:
     return _bot_username_cache
 
 
+# ====== Генераторы картинок для inline ======
+
+async def _generate_balance_image(user_id: int, user: dict) -> str | None:
+    """Генерирует красивую картинку баланса и возвращает URL."""
+    if not HAS_PILLOW:
+        return None
+    
+    import os
+    os.makedirs("/tmp/ezh_inline", exist_ok=True)
+    
+    width, height = 800, 500
+    image = Image.new("RGB", (width, height))
+    
+    # Градиентный фон
+    draw = ImageDraw.Draw(image)
+    for y in range(height):
+        r = int(20 + (y / height) * 30)
+        g = int(10 + (y / height) * 20)
+        b = int(50 + (y / height) * 40)
+        draw.line([(0, y), (width, y)], fill=(r, g, b))
+    
+    # Рамка
+    draw.rectangle([15, 15, width - 16, height - 16], outline=(255, 220, 255), width=3)
+    draw.rectangle([25, 25, width - 26, height - 26], outline=(200, 170, 255), width=1)
+    
+    # Шрифты
+    font_title = None
+    font_value = None
+    font_small = None
+    for fp in [
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+        "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
+    ]:
+        try:
+            font_title = ImageFont.truetype(fp, 42)
+            font_value = ImageFont.truetype(fp, 36)
+            font_small = ImageFont.truetype(fp, 22)
+            break
+        except Exception:
+            continue
+    if font_title is None:
+        font_title = ImageFont.load_default()
+        font_value = font_title
+        font_small = font_title
+    
+    # Заголовок
+    title = f"🦔 {user['hedgehog_name']}"
+    bbox = draw.textbbox((0, 0), title, font=font_title)
+    tw = bbox[2] - bbox[0]
+    draw.text(((width - tw) / 2, 40), title, fill=(255, 220, 100), font=font_title)
+    
+    # Получаем бNтk0ины
+    async with aiosqlite.connect(DB_NAME) as db:
+        async with db.execute("SELECT b1tcoins FROM m1ning_state WHERE user_id = ?", (user_id,)) as cursor:
+            row = await cursor.fetchone()
+            b1tcoins = row[0] if row else 0
+    
+    # Валюты
+    currencies = [
+        ("💰 Ежидзики", f"{user['balance']}", (255, 215, 0)),
+        ("🐘 Кожа слона", f"{user['elephant_skin']}", (200, 180, 140)),
+        ("💎 Алмазы", f"{user['diamonds']}", (100, 200, 255)),
+        ("🪙 бNтk0ины", f"{b1tcoins:.1f}", (255, 150, 50)),
+    ]
+    
+    y_offset = 120
+    for label, value, color in currencies:
+        draw.text((80, y_offset), label, fill=(200, 200, 200), font=font_small)
+        bbox_v = draw.textbbox((0, 0), value, font=font_value)
+        vw = bbox_v[2] - bbox_v[0]
+        draw.text((width - 80 - vw, y_offset - 5), value, fill=color, font=font_value)
+        # Разделитель
+        draw.line([(80, y_offset + 55), (width - 80, y_offset + 55)], fill=(100, 80, 120), width=1)
+        y_offset += 70
+    
+    # Водянка
+    draw.text((width - 250, height - 45), "Говорящий ёж 🦔", fill=(80, 60, 90), font=font_small)
+    
+    # Сохраняем
+    filename = f"bal_{user_id}.png"
+    filepath = f"/tmp/ezh_inline/{filename}"
+    image.save(filepath, "PNG")
+    
+    from web import PUBLIC_URL
+    return f"{PUBLIC_URL}/img/{filename}"
+
+
+async def _generate_hedgehog_image(user_id: int, user: dict) -> str | None:
+    """Генерирует красивую картинку ежа и возвращает URL."""
+    if not HAS_PILLOW:
+        return None
+    
+    import os
+    os.makedirs("/tmp/ezh_inline", exist_ok=True)
+    
+    width, height = 800, 600
+    image = Image.new("RGB", (width, height))
+    
+    # Градиентный фон — зелёный лес
+    draw = ImageDraw.Draw(image)
+    for y in range(height):
+        r = int(10 + (y / height) * 20)
+        g = int(40 + (y / height) * 30)
+        b = int(15 + (y / height) * 20)
+        draw.line([(0, y), (width, y)], fill=(r, g, b))
+    
+    # Рамка
+    draw.rectangle([15, 15, width - 16, height - 16], outline=(150, 255, 150), width=3)
+    draw.rectangle([25, 25, width - 26, height - 26], outline=(100, 200, 100), width=1)
+    
+    # Шрифты
+    font_title = None
+    font_value = None
+    font_small = None
+    for fp in [
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+        "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
+    ]:
+        try:
+            font_title = ImageFont.truetype(fp, 48)
+            font_value = ImageFont.truetype(fp, 28)
+            font_small = ImageFont.truetype(fp, 22)
+            break
+        except Exception:
+            continue
+    if font_title is None:
+        font_title = ImageFont.load_default()
+        font_value = font_title
+        font_small = font_title
+    
+    # Имя ежа
+    name = user['hedgehog_name']
+    bbox = draw.textbbox((0, 0), name, font=font_title)
+    tw = bbox[2] - bbox[0]
+    draw.text(((width - tw) / 2, 35), name, fill=(255, 255, 200), font=font_title)
+    
+    # Большой ёжик
+    hedgehog_y = 110
+    draw.text(((width - 300) / 2, hedgehog_y), "🦔🦔🦔", fill=(255, 255, 255), font=font_title)
+    
+    # Инфо
+    class_names = {"normal": "Обычный 🦔", "ejidze": "Ежидзе 🤠", "fat": "Толстый 🦔", "golden": "Золотой 🟡"}
+    cls = class_names.get(user['hedgehog_class'], user['hedgehog_class'])
+    status = "🟢 Живой" if user['status'] == 'alive' else "💀 Мёртвый"
+    injured = " 🩹Травма!" if user['is_injured'] else ""
+    
+    info_lines = [
+        (f"Класс: {cls}", (200, 255, 200)),
+        (f"Цвет: {user['hedgehog_color']}", (200, 200, 255)),
+        (f"Сытость: {user['satiety']:.0f}%", (255, 200, 100) if user['satiety'] > 30 else (255, 80, 80)),
+        (f"Счастье: {user['happiness']:.0f}%", (255, 150, 200)),
+        (f"Статус: {status}{injured}", (150, 255, 150) if user['status'] == 'alive' else (255, 80, 80)),
+        (f"Муравьи: {user['ants']} 🐜", (200, 200, 200)),
+    ]
+    
+    y_off = 230
+    for text_line, color in info_lines:
+        draw.text((80, y_off), text_line, fill=color, font=font_value)
+        y_off += 45
+    
+    # Водянка
+    draw.text((width - 250, height - 45), "Говорящий ёж 🦔", fill=(60, 100, 60), font=font_small)
+    
+    # Сытость — полоска
+    bar_x, bar_y, bar_w, bar_h = 80, y_off + 15, width - 160, 25
+    draw.rectangle([bar_x, bar_y, bar_x + bar_w, bar_y + bar_h], fill=(60, 40, 40))
+    fill_w = int(bar_w * min(user['satiety'], 100) / 100)
+    bar_color = (80, 200, 80) if user['satiety'] > 30 else (255, 80, 80)
+    draw.rectangle([bar_x, bar_y, bar_x + fill_w, bar_y + bar_h], fill=bar_color)
+    draw.rectangle([bar_x, bar_y, bar_x + bar_w, bar_y + bar_h], outline=(200, 200, 200), width=1)
+    
+    # Сохраняем
+    filename = f"ezh_{user_id}.png"
+    filepath = f"/tmp/ezh_inline/{filename}"
+    image.save(filepath, "PNG")
+    
+    from web import PUBLIC_URL
+    return f"{PUBLIC_URL}/img/{filename}"
+
+
+# ====== Callback для inline-перевода ======
+
+@router.callback_query(F.data.startswith("ixfer_"))
+async def inline_transfer_confirm(callback: CallbackQuery):
+    """Подтверждение перевода из inline-режима."""
+    parts = callback.data.split("_")
+    if len(parts) != 4:
+        await callback.answer("❌ Ошибка данных", show_alert=True)
+        return
+    
+    _, from_id_str, to_id_str, amount_str = parts
+    from_id = int(from_id_str)
+    to_id = int(to_id_str)
+    amount = int(amount_str)
+    
+    # Проверяем что нажал отправитель
+    if callback.from_user.id != from_id:
+        await callback.answer("❌ Это не ваш перевод!", show_alert=True)
+        return
+    
+    # Проверяем баланс
+    user = await get_user(from_id)
+    if not user or user['balance'] < amount:
+        await callback.answer("❌ Недостаточно Ежидзиков!", show_alert=True)
+        return
+    
+    # Проверяем получателя
+    target = await get_user(to_id)
+    if not target:
+        await callback.answer("❌ Получатель не найден!", show_alert=True)
+        return
+    
+    if from_id == to_id:
+        await callback.answer("❌ Нельзя переводить себе!", show_alert=True)
+        return
+    
+    # Выполняем перевод
+    commission = max(1, int(amount * 0.05))
+    to_receive = amount - commission
+    
+    async with aiosqlite.connect(DB_NAME) as db:
+        cursor = await db.execute(
+            "UPDATE users SET balance = balance - ? WHERE user_id = ? AND balance >= ?",
+            (amount, from_id, amount)
+        )
+        if cursor.rowcount == 0:
+            await callback.answer("❌ Недостаточно средств!", show_alert=True)
+            return
+        await db.execute("UPDATE users SET balance = balance + ? WHERE user_id = ?", (to_receive, to_id))
+        await db.commit()
+    
+    # Обновляем кнопку
+    try:
+        await callback.message.edit_reply_markup(
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="✅ Перевод выполнен!", callback_data="ixfer_done")]
+            ])
+        )
+    except Exception:
+        pass
+    
+    await callback.answer(f"✅ Переведено {amount} ЕЖ! Получатель получит {to_receive} ЕЖ", show_alert=True)
+
+
+@router.callback_query(F.data == "ixfer_cancel")
+async def inline_transfer_cancel(callback: CallbackQuery):
+    """Отмена перевода из inline-режима."""
+    try:
+        await callback.message.edit_reply_markup(
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="❌ Отменено", callback_data="ixfer_done")]
+            ])
+        )
+    except Exception:
+        pass
+    await callback.answer("❌ Перевод отменён")
+
+
+@router.callback_query(F.data == "ixfer_done")
+async def inline_transfer_done(callback: CallbackQuery):
+    """Пустой обработчик для использованных кнопок."""
+    await callback.answer("Действие уже выполнено")
+
+
 @router.inline_query()
 async def inline_query_handler(query: InlineQuery):
     text = query.query.strip()
     results = []
     bot_username = await _get_bot_username()
+    user_id = query.from_user.id
     
-    # Режим "pr CODE"
-    if text.lower().startswith("pr "):
+    # Проверяем что юзер зарегистрирован
+    user = await get_user(user_id)
+    
+    cmd = text.lower().split()[0] if text.split() else ""
+    
+    # ====== @bot ref — Реферальная ссылка ======
+    if cmd == "ref":
+        if user:
+            ref_link = f"https://t.me/{bot_username}?start={user_id}"
+            msg_text = (
+                f"🦔 Пригласи друга в Говорящего Ежа! 🦔\n\n"
+                f"👬 Переходи по ссылке и получи:\n"
+                f"• 200 Ежидзиков на старт\n"
+                f"• Своего ежа бесплатно!\n\n"
+                f"📌 {ref_link}"
+            )
+            results.append(InlineQueryResultArticle(
+                id="ref",
+                title="👬 Пригласить друга",
+                description=f"Реферальная ссылка — получи бонус за каждого друга!",
+                input_message_content=InputTextMessageContent(message_text=msg_text),
+                reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                    [InlineKeyboardButton(text="🦔 Начать играть!", url=ref_link)]
+                ])
+            ))
+        else:
+            results.append(InlineQueryResultArticle(
+                id="ref_no_user",
+                title="❌ Сначала нажми /start в боте",
+                description="Ты ещё не зарегистрирован",
+                input_message_content=InputTextMessageContent(message_text="❌ Сначала нажми /start в боте @talking_ezh_bot")
+            ))
+    
+    # ====== @bot b — Баланс с картинкой ======
+    elif cmd == "b":
+        if user:
+            # Генерируем картинку баланса
+            img_url = None
+            if HAS_PILLOW:
+                try:
+                    img_url = await _generate_balance_image(user_id, user)
+                except Exception as e:
+                    print(f"⚠️ Ошибка генерации картинки баланса: {e}")
+            
+            # Получаем бNтk0ины
+            async with aiosqlite.connect(DB_NAME) as db:
+                async with db.execute("SELECT b1tcoins FROM m1ning_state WHERE user_id = ?", (user_id,)) as cursor:
+                    row = await cursor.fetchone()
+                    b1tcoins = row[0] if row else 0
+            
+            msg_text = (
+                f"🦔 Баланс игрока {user['hedgehog_name']} 🦔\n\n"
+                f"💰 Ежидзики: {user['balance']}👍\n"
+                f"🐘 Кожа слона: {user['elephant_skin']}\n"
+                f"💎 Алмазы: {user['diamonds']}\n"
+                f"🪙 бNтk0ины: {b1tcoins:.1f}"
+            )
+            
+            if img_url:
+                results.append(InlineQueryResultPhoto(
+                    id="balance_img",
+                    photo_url=img_url,
+                    thumbnail_url=img_url,
+                    title=f"💰 Баланс: {user['balance']} ЕЖ",
+                    description=f"Кожа: {user['elephant_skin']} | Алмазы: {user['diamonds']} | бNтk0ины: {b1tcoins:.1f}",
+                    caption=msg_text,
+                    reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                        [InlineKeyboardButton(text="🦔 Открыть бота", url=f"https://t.me/{bot_username}")]
+                    ])
+                ))
+            else:
+                results.append(InlineQueryResultArticle(
+                    id="balance",
+                    title=f"💰 Баланс: {user['balance']} ЕЖ",
+                    description=f"Кожа: {user['elephant_skin']} | Алмазы: {user['diamonds']}",
+                    input_message_content=InputTextMessageContent(message_text=msg_text),
+                    reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                        [InlineKeyboardButton(text="🦔 Открыть бота", url=f"https://t.me/{bot_username}")]
+                    ])
+                ))
+        else:
+            results.append(InlineQueryResultArticle(
+                id="b_no_user",
+                title="❌ Сначала нажми /start в боте",
+                description="Ты ещё не зарегистрирован",
+                input_message_content=InputTextMessageContent(message_text="❌ Сначала нажми /start в боте @talking_ezh_bot")
+            ))
+    
+    # ====== @bot ez — Фото и инфо про ежа ======
+    elif cmd == "ez":
+        if user:
+            # Генерируем картинку ежа
+            img_url = None
+            if HAS_PILLOW:
+                try:
+                    img_url = await _generate_hedgehog_image(user_id, user)
+                except Exception as e:
+                    print(f"⚠️ Ошибка генерации картинки ежа: {e}")
+            
+            class_names = {"normal": "Обычный 🦔", "ejidze": "Ежидзе 🤠", "fat": "Толстый 🦔", "golden": "Золотой 🟡"}
+            cls = class_names.get(user['hedgehog_class'], user['hedgehog_class'])
+            status = "живой 🟢" if user['status'] == 'alive' else "мёртвый 💀"
+            injured = " | 🩹 Травма!" if user['is_injured'] else ""
+            
+            msg_text = (
+                f"🦔 {user['hedgehog_name']} 🦔\n\n"
+                f"📋 Класс: {cls}\n"
+                f"🎨 Цвет: {user['hedgehog_color']}\n"
+                f"🍖 Сытость: {user['satiety']:.0f}%\n"
+                f"❤️ Счастье: {user['happiness']:.0f}%\n"
+                f"📡 Статус: {status}{injured}\n"
+                f"🐜 Муравьи: {user['ants']}"
+            )
+            
+            if img_url:
+                results.append(InlineQueryResultPhoto(
+                    id="hedgehog_img",
+                    photo_url=img_url,
+                    thumbnail_url=img_url,
+                    title=f"🦔 {user['hedgehog_name']} — Сытость: {user['satiety']:.0f}%",
+                    description=f"Класс: {cls} | Счастье: {user['happiness']:.0f}% | {status}",
+                    caption=msg_text,
+                    reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                        [InlineKeyboardButton(text="🦔 Покормить ежа!", url=f"https://t.me/{bot_username}")]
+                    ])
+                ))
+            else:
+                results.append(InlineQueryResultArticle(
+                    id="hedgehog",
+                    title=f"🦔 {user['hedgehog_name']} — Сытость: {user['satiety']:.0f}%",
+                    description=f"Класс: {cls} | Счастье: {user['happiness']:.0f}%",
+                    input_message_content=InputTextMessageContent(message_text=msg_text),
+                    reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                        [InlineKeyboardButton(text="🦔 Покормить ежа!", url=f"https://t.me/{bot_username}")]
+                    ])
+                ))
+        else:
+            results.append(InlineQueryResultArticle(
+                id="ez_no_user",
+                title="❌ Сначала нажми /start в боте",
+                description="Ты ещё не зарегистрирован",
+                input_message_content=InputTextMessageContent(message_text="❌ Сначала нажми /start в боте @talking_ezh_bot")
+            ))
+    
+    # ====== @bot go @юз [сколько] — Перевод с подтверждением ======
+    elif cmd == "go":
+        parts = text.split()
+        if len(parts) >= 3:
+            recipient_raw = parts[1]
+            try:
+                amount = int(parts[2])
+            except ValueError:
+                amount = 0
+            
+            if amount < 10:
+                results.append(InlineQueryResultArticle(
+                    id="go_min",
+                    title="❌ Минимум 10 Ежидзиков",
+                    description="Минимальная сумма перевода — 10 ЕЖ",
+                    input_message_content=InputTextMessageContent(message_text="❌ Минимальная сумма перевода — 10 Ежидзиков!")
+                ))
+            elif user and user['balance'] < amount:
+                results.append(InlineQueryResultArticle(
+                    id="go_no_money",
+                    title=f"❌ Недостаточно средств",
+                    description=f"У тебя {user['balance']} ЕЖ, а нужно {amount}",
+                    input_message_content=InputTextMessageContent(message_text=f"❌ Недостаточно Ежидзиков! У тебя {user['balance']}, нужно {amount}")
+                ))
+            else:
+                # Ищем получателя
+                target = await find_user_flexible(recipient_raw)
+                if target:
+                    commission = max(1, int(amount * 0.05))
+                    to_receive = amount - commission
+                    callback_data = f"ixfer_{user_id}_{target['user_id']}_{amount}"
+                    # Проверяем длину callback_data
+                    if len(callback_data.encode('utf-8')) <= 64:
+                        kb = InlineKeyboardMarkup(inline_keyboard=[
+                            [InlineKeyboardButton(text="✅ Подтвердить перевод", callback_data=callback_data)],
+                            [InlineKeyboardButton(text="❌ Отмена", callback_data="ixfer_cancel")]
+                        ])
+                    else:
+                        kb = InlineKeyboardMarkup(inline_keyboard=[
+                            [InlineKeyboardButton(text="✅ Подтвердить в боте", url=f"https://t.me/{bot_username}")]
+                        ])
+                    
+                    msg_text = (
+                        f"💸 Перевод Ежидзиков\n\n"
+                        f"👤 От: {query.from_user.first_name}\n"
+                        f"👤 Кому: @{target['username']} (#{target['player_number']:04d})\n"
+                        f"💰 Сумма: {amount} Ежидзиков\n"
+                        f"📉 Комиссия: {commission} ЕЖ (5%)\n"
+                        f"📥 Получит: {to_receive} ЕЖ"
+                    )
+                    
+                    results.append(InlineQueryResultArticle(
+                        id="transfer_confirm",
+                        title=f"💸 Перевод {amount} ЕЖ → @{target['username']}",
+                        description=f"Комиссия: {commission} ЕЖ | Получит: {to_receive} ЕЖ",
+                        input_message_content=InputTextMessageContent(message_text=msg_text),
+                        reply_markup=kb
+                    ))
+                else:
+                    results.append(InlineQueryResultArticle(
+                        id="go_not_found",
+                        title=f"❌ Игрок {recipient_raw} не найден",
+                        description="Укажи ID, @username или #номер",
+                        input_message_content=InputTextMessageContent(message_text=f"❌ Игрок '{recipient_raw}' не найден! Укажи ID, @username или #номер")
+                    ))
+        else:
+            results.append(InlineQueryResultArticle(
+                id="go_help",
+                title="💸 Перевод Ежидзиков",
+                description=f"Напишите: @{bot_username} go @юзернейм сумма",
+                input_message_content=InputTextMessageContent(
+                    message_text=f"💸 Перевод Ежидзиков\n\nИспользуй: @{bot_username} go @юзернейм сумма\n\nПример: @{bot_username} go @friend 100\nМинимум: 10 ЕЖ | Комиссия: 5%"
+                )
+            ))
+    
+    # ====== @bot pr CODE — Промокод (сохраняем) ======
+    elif text.lower().startswith("pr "):
         code = text[3:].strip().upper()
         if code:
             async with aiosqlite.connect(DB_NAME) as db:
@@ -9867,10 +10351,7 @@ async def inline_query_handler(query: InlineQuery):
                     f"🌟 Даёт: {promo['reward_value']} {curr_name}"
                 )
                 
-                # Используем callback-кнопку вместо URL — надёжнее!
-                # URL-deeplink часто не срабатывает у уже зарегистрированных пользователей
                 callback_code = f"ipromo_{code}"
-                # Проверяем длину callback_data (лимит 64 байта)
                 if len(callback_code.encode('utf-8')) <= 64:
                     results.append(InlineQueryResultArticle(
                         id=f"promo_{code}",
@@ -9882,7 +10363,6 @@ async def inline_query_handler(query: InlineQuery):
                         ])
                     ))
                 else:
-                    # Fallback: слишком длинный код — используем URL
                     url = f"https://t.me/{bot_username}?start=promo_{code}"
                     results.append(InlineQueryResultArticle(
                         id=f"promo_{code}",
@@ -9894,7 +10374,6 @@ async def inline_query_handler(query: InlineQuery):
                         ])
                     ))
             else:
-                # Промокод не найден — показываем сообщение
                 results.append(InlineQueryResultArticle(
                     id="not_found",
                     title="❌ Промокод не найден",
@@ -9904,19 +10383,20 @@ async def inline_query_handler(query: InlineQuery):
                     )
                 ))
     
-    # Если пустой запрос
-    if not text or not text.lower().startswith("pr "):
+    # ====== Пустой запрос — показать все команды ======
+    else:
         results.append(InlineQueryResultArticle(
             id="info",
-            title="🎟 Поделиться промокодом",
-            description=f"Напишите @{bot_username} pr КОД для отправки промокода",
+            title="🦔 Говорящий Еж — Команды",
+            description=f"ref | b | ez | go | pr",
             input_message_content=InputTextMessageContent(
                 message_text=(
-                    f"🦔 Промокоды бота Говорящий Еж!\n\n"
-                    f"Чтобы поделиться промокодом:\n"
-                    f"1. Введите: @{bot_username} pr КОД\n"
-                    f"2. Нажмите на результат\n"
-                    f"3. Любой пользователь сможет забрать промокод!"
+                    f"🦔 Говорящий Еж — Inline-команды!\n\n"
+                    f"👬 ref — Пригласить друга\n"
+                    f"💰 b — Показать баланс\n"
+                    f"🦔 ez — Показать ежа\n"
+                    f"💸 go @юз 100 — Перевод\n"
+                    f"🎟 pr КОД — Поделиться промокодом"
                 )
             )
         ))
