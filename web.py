@@ -889,7 +889,7 @@ async def handle_finances(request):
             <span class="stat-value pink">{user_data.get('diamonds', 0):,}</span>
         </div>
         <div class="stat-row">
-            <span class="stat-label">⛏️ бNтk0ины</span>
+            <span class="stat-label">⛏️ Биткоины</span>
             <span class="stat-value purple">{b1tcoins:,.2f}</span>
         </div>
     </div>
@@ -1260,7 +1260,7 @@ async def handle_exchange(request):
     <div class="exchange-direction">
         <a href="/exchange?tab=skin" class="{'active' if tab == 'skin' else ''}">🐘 Кожа</a>
         <a href="/exchange?tab=diamond" class="{'active' if tab == 'diamond' else ''}">💎 Алмазы</a>
-        <a href="/exchange?tab=b1tcoin" class="{'active' if tab == 'b1tcoin' else ''}">⛏️ бNтk0ины</a>
+        <a href="/exchange?tab=b1tcoin" class="{'active' if tab == 'b1tcoin' else ''}">⛏️ Биткоины</a>
     </div>"""
 
     if tab == "skin":
@@ -1325,24 +1325,24 @@ async def handle_exchange(request):
         b1tcoins = m1ning.get('b1tcoins', 0)
 
         form_html = f"""
-        <div class="exchange-rate">⚡ Курс: 1 бNтk0ин = {rate:.2f} Ежидзиков &bull; 1 Алмаз ≈ {diamond_rate:.4f} бNтk0инов &bull; Комиссия 10%</div>
+        <div class="exchange-rate">⚡ Курс: 1 биткоин = {rate:.2f} Ежидзиков &bull; 1 Алмаз ≈ {diamond_rate:.4f} биткоинов &bull; Комиссия 10%</div>
         <div class="card">
-            <div class="section-title">бNтk0ины → Ежидзики</div>
-            <p style="font-size:13px;color:rgba(255,255,255,0.4);margin-bottom:10px">Обмен с комиссией 10%. У вас: {b1tcoins:.2f} бNтk0инов</p>
+            <div class="section-title">Биткоины → Ежидзики</div>
+            <p style="font-size:13px;color:rgba(255,255,255,0.4);margin-bottom:10px">Обмен с комиссией 10%. У вас: {b1tcoins:.2f} биткоинов</p>
             <form method="POST" action="/exchange/b1tcoin_to_balance">
                 <div class="input-group">
-                    <label>Количество бNтk0инов</label>
+                    <label>Количество биткоинов</label>
                     <input type="number" name="amount" min="1" max="{int(b1tcoins)}" step="0.01" value="1" required>
                 </div>
                 <button type="submit" class="btn btn-green btn-sm">👍 Обменять</button>
             </form>
         </div>
         <div class="card">
-            <div class="section-title">бNтk0ины → Алмазы</div>
-            <p style="font-size:13px;color:rgba(255,255,255,0.4);margin-bottom:10px">Обмен с комиссией 10%. У вас: {b1tcoins:.2f} бNтk0инов</p>
+            <div class="section-title">Биткоины → Алмазы</div>
+            <p style="font-size:13px;color:rgba(255,255,255,0.4);margin-bottom:10px">Обмен с комиссией 10%. У вас: {b1tcoins:.2f} биткоинов</p>
             <form method="POST" action="/exchange/b1tcoin_to_dia">
                 <div class="input-group">
-                    <label>Количество бNтk0инов</label>
+                    <label>Количество биткоинов</label>
                     <input type="number" name="amount" min="1" max="{int(b1tcoins)}" step="0.01" value="1" required>
                 </div>
                 <button type="submit" class="btn btn-sm" style="background:linear-gradient(135deg,#ec4899,#be185d);color:#fff">💎 Обменять</button>
@@ -1479,7 +1479,7 @@ async def handle_exchange_dia_to_skin(request):
 
 
 async def handle_exchange_b1tcoin_to_balance(request):
-    """бNтk0ины → Ежидзики (10% комиссия)"""
+    """Биткоины → Ежидзики (10% комиссия)"""
     user_id, user_data = await _get_auth_user(request)
     if not user_id:
         return web.HTTPFound('/')
@@ -1500,7 +1500,7 @@ async def handle_exchange_b1tcoin_to_balance(request):
         return web.HTTPFound('/exchange?tab=b1tcoin&msg=invalid')
 
     async with aiosqlite.connect(DB_NAME) as db:
-        # Проверяем достаточно ли бNтk0инов
+        # Проверяем достаточно ли биткоинов
         db.row_factory = aiosqlite.Row
         async with db.execute("SELECT b1tcoins FROM m1ning_state WHERE user_id = ?", (user_id,)) as cursor:
             row = await cursor.fetchone()
@@ -1514,7 +1514,7 @@ async def handle_exchange_b1tcoin_to_balance(request):
 
 
 async def handle_exchange_b1tcoin_to_dia(request):
-    """бNтk0ины → Алмазы (10% комиссия)"""
+    """Биткоины → Алмазы (10% комиссия)"""
     user_id, user_data = await _get_auth_user(request)
     if not user_id:
         return web.HTTPFound('/')

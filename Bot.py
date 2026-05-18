@@ -409,7 +409,7 @@ async def init_db():
             )
         ''')
 
-        # мαйHинг: каталог комплектующих
+        # майнинг: каталог комплектующих
         await db.execute('''
             CREATE TABLE IF NOT EXISTS m1ning_components (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -425,7 +425,7 @@ async def init_db():
             )
         ''')
 
-        # мαйHинг: инвентарь комплектующих игрока
+        # майнинг: инвентарь комплектующих игрока
         await db.execute('''
             CREATE TABLE IF NOT EXISTS m1ning_inventory (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -438,7 +438,7 @@ async def init_db():
             )
         ''')
 
-        # мαйHинг: с6opки (собранные установки)
+        # майнинг: сборки (собранные установки)
         await db.execute('''
             CREATE TABLE IF NOT EXISTS m1ning_rigs (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -453,7 +453,7 @@ async def init_db():
             )
         ''')
 
-        # мαйHинг: состояние игрока
+        # майнинг: состояние игрока
         await db.execute('''
             CREATE TABLE IF NOT EXISTS m1ning_state (
                 user_id INTEGER PRIMARY KEY,
@@ -546,13 +546,13 @@ async def init_db():
             ("ant_income", "10"),
             ("daily_bonus", "25"),
             ("m1ning_electricity_rate", "1"),  # 1 Ежидзик за 10W/час
-            ("m1ning_base_coin_rate", "0.5"),  # базовый курс бNтk0ина
+            ("m1ning_base_coin_rate", "0.5"),  # базовый курс биткоина
             ("m1ning_max_rigs", "5")
         ]
         for key, value in default_settings:
             await db.execute("INSERT OR IGNORE INTO bot_settings (key, value) VALUES (?, ?)", (key, value))
 
-        # Каталог комплектующих для мαйHинга
+        # Каталог комплектующих для майнинга
         m1ning_components = [
             # Видеокарты (comp_type='v1deo', mh_rate, power_w)
             ("GT 710", "v1deo", 500, "balance", 1, 30, 0, 0),
@@ -563,7 +563,7 @@ async def init_db():
             ("БП 500W", "psu", 300, "balance", 0, 0, 1, 0),
             ("БП 1000W", "psu", 800, "balance", 0, 0, 2, 0),
             ("БП 2000W", "psu", 2000, "balance", 0, 0, 5, 0),
-            # Материнские платы (comp_type='mobo', 1 с6opк = 1 плата)
+            # Материнские платы (comp_type='mobo', 1 риг = 1 плата)
             ("Плата H110", "mobo", 1000, "balance", 0, 0, 0, 0),
             # Охлаждение (comp_type='cooling', break_reduction=снижение шанса поломки)
             ("Вентилятор 120мм", "cooling", 500, "balance", 0, 0, 0, 0.10),
@@ -1049,7 +1049,7 @@ class ForgeStates(StatesGroup):
     waiting_craft_search = State()
 
 class M1ningStates(StatesGroup):
-    # Обмен бNтk0инов
+    # Обмен биткоинов
     waiting_exchange_amount = State()
     # Покупка комплектующих
     waiting_buy_qty = State()
@@ -1130,7 +1130,7 @@ def main_menu_keyboard(is_admin: bool = False):
             InlineKeyboardButton(text="🔑 Ключ входа", callback_data="web_key", style=ButtonStyle.PRIMARY),
         ],
         [
-            InlineKeyboardButton(text="👬Пс6opкласить друга👬", callback_data="invite"),
+            InlineKeyboardButton(text="👬Пригласить друга👬", callback_data="invite"),
             InlineKeyboardButton(text="🎁Бонусы🎁", callback_data="bonuses", style=ButtonStyle.PRIMARY)
         ]
     ]
@@ -1167,7 +1167,7 @@ def puzzle_keyboard():
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="🛒 Магазин", callback_data="shop", style=ButtonStyle.SUCCESS)],
         [InlineKeyboardButton(text="⚒️ Кузница", callback_data="forge", style=ButtonStyle.PRIMARY)],
-        [InlineKeyboardButton(text="💻 мαйHинг", callback_data="m1ning", style=ButtonStyle.PRIMARY)],
+        [InlineKeyboardButton(text="💻 Майнинг", callback_data="m1ning", style=ButtonStyle.PRIMARY)],
         [InlineKeyboardButton(text="🎰 Домашнее казино", callback_data="hc_casino", style=ButtonStyle.PRIMARY)],
         [InlineKeyboardButton(text="🧪 Image Test", callback_data="image_test")],
         [InlineKeyboardButton(text="🤖 ИИ-ЕЖ", callback_data="stub_ai")],
@@ -1234,8 +1234,8 @@ def auction_currency_keyboard(action_data: str):
 def m1ning_keyboard():
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="🛒 Рынок", callback_data="m1ning_market", style=ButtonStyle.SUCCESS),
-         InlineKeyboardButton(text="🔧 Мой с6opк", callback_data="m1ning_rig")],
-        [InlineKeyboardButton(text="⚡ мαйHинг", callback_data="m1ning_dashboard", style=ButtonStyle.PRIMARY),
+         InlineKeyboardButton(text="🔧 Мои риги", callback_data="m1ning_rig")],
+        [InlineKeyboardButton(text="⚡ Майнинг", callback_data="m1ning_dashboard", style=ButtonStyle.PRIMARY),
          InlineKeyboardButton(text="💱 Обмен", callback_data="m1ning_exchange")],
         [InlineKeyboardButton(text="Назад ◀️◀️◀️", callback_data="puzzle")]
     ])
@@ -2560,7 +2560,7 @@ async def reply_my_hedgehog(message: Message, state: FSMContext):
         f"🕘 Дней в боте с ежиком 🦔 - {days_in_bot}\n"
         f"🐘 Кожа слона: {user['elephant_skin']}\n"
         f"💎 Алмазы: {user['diamonds']}\n"
-        f"👬 Пс6opклашено друзей: {user['referrals_count']}\n"
+        f"👬 Приглашено друзей: {user['referrals_count']}\n"
         f"👬🎁 Заработано с друзей: {user['referrals_earned']} Ежидзиков👍{injured_text}",
         reply_markup=my_hedgehog_keyboard(user['hedgehog_class'])
     )
@@ -3204,7 +3204,7 @@ async def callback_my_hedgehog(callback: CallbackQuery, state: FSMContext):
         f"🕘 Дней в боте с ежиком 🦔 - {days_in_bot}\n"
         f"🐘 Кожа слона: {user['elephant_skin']}\n"
         f"💎 Алмазы: {user['diamonds']}\n"
-        f"👬 Пс6opклашено друзей: {user['referrals_count']}\n"
+        f"👬 Приглашено друзей: {user['referrals_count']}\n"
         f"👬🎁 Заработано с друзей: {user['referrals_earned']} Ежидзиков👍{injured_text}",
         reply_markup=my_hedgehog_keyboard(user['hedgehog_class'])
     )
@@ -3672,7 +3672,7 @@ async def invite(callback: CallbackQuery, state: FSMContext):
     invite_link = f"https://t.me/{bot_info.username}?start={user_id}"
     
     full_text = (
-        f"🎁👬 Пс6opклашай друзей и получай крутые бонусы! И друзья тоже их получат! 🎁\n\n"
+        f"🎁👬 Приглашай друзей и получай крутые бонусы! И друзья тоже их получат! 🎁\n\n"
         f"🎁 Бонус для тебя:\n"
         f"- ПРОМОКОД НА 10 ЕЖИДЗИКОВ👍! 🎁\n"
         f"- 20 ежидзиков👍\n"
@@ -4998,7 +4998,7 @@ async def forge_inventory_item(callback: CallbackQuery):
 # --- Вспомогательные функции ---
 
 async def get_m1ning_state(user_id: int) -> dict:
-    """Получает или создаёт состояние мαйHинга игрока."""
+    """Получает или создаёт состояние майнинга игрока."""
     async with aiosqlite.connect(DB_NAME) as db:
         db.row_factory = aiosqlite.Row
         async with db.execute("SELECT * FROM m1ning_state WHERE user_id = ?", (user_id,)) as cursor:
@@ -5012,7 +5012,7 @@ async def get_m1ning_state(user_id: int) -> dict:
 
 
 async def get_m1ning_inventory(user_id: int) -> dict:
-    """Возвращает dict {component_id: {quantity, is_broken}} инвентаря мαйHинга."""
+    """Возвращает dict {component_id: {quantity, is_broken}} инвентаря майнинга."""
     async with aiosqlite.connect(DB_NAME) as db:
         db.row_factory = aiosqlite.Row
         async with db.execute(
@@ -5029,7 +5029,7 @@ async def get_m1ning_inventory(user_id: int) -> dict:
 
 
 async def get_user_rigs(user_id: int) -> list:
-    """Получает все с6opки игрока."""
+    """Получает все сборки игрока."""
     async with aiosqlite.connect(DB_NAME) as db:
         db.row_factory = aiosqlite.Row
         async with db.execute("SELECT * FROM m1ning_rigs WHERE user_id = ?", (user_id,)) as cursor:
@@ -5037,7 +5037,7 @@ async def get_user_rigs(user_id: int) -> list:
 
 
 async def calc_rig_stats(rig: dict) -> dict:
-    """Рассчитывает хешрейт, потребление и защиту с6opка."""
+    """Рассчитывает хешрейт, потребление и защиту сборка."""
     async with aiosqlite.connect(DB_NAME) as db:
         db.row_factory = aiosqlite.Row
         stats = {"mh": 0, "power": 0, "break_reduction": 0, "v1deo_name": "?", "psu_name": "?", "mobo_name": "?"}
@@ -5074,12 +5074,12 @@ async def calc_rig_stats(rig: dict) -> dict:
 
 
 async def get_b1tcoin_rate() -> float:
-    """Рассчитывает текущий курс бNтk0ина в Ежидзиках."""
+    """Рассчитывает текущий курс биткоина в Ежидзиках."""
     base_rate = float(await get_setting("m1ning_base_coin_rate", "0.5"))
     async with aiosqlite.connect(DB_NAME) as db:
         async with db.execute("SELECT COALESCE(SUM(total_m1ned), 0) FROM m1ning_state") as cursor:
             total_m1ned = (await cursor.fetchone())[0]
-    # Курс падает по мере накопления бNтk0инов в экономике
+    # Курс падает по мере накопления биткоинов в экономике
     rate = base_rate * 45 / (1 + total_m1ned / 10000)
     return max(rate, 0.1)  # Минимальный курс
 
@@ -5103,11 +5103,11 @@ async def m1ning_menu(callback: CallbackQuery, state: FSMContext):
     rate = await get_b1tcoin_rate()
     
     text = (
-        "💻 **мαйHинг**\n\n"
-        f"💰 бNтk0ины: **{ms['b1tcoins']:.2f}**\n"
-        f"📊 Курс: 1 бNтk0ин = {rate:.2f} Ежидзиков\n"
+        "💻 **майнинг**\n\n"
+        f"💰 биткоины: **{ms['b1tcoins']:.2f}**\n"
+        f"📊 Курс: 1 биткоин = {rate:.2f} Ежидзиков\n"
         f"🔧 С6opок: {len(rigs)}\n"
-        f"{'🟢 мαйHинг активен' if ms['is_m1ning'] else '🔴 мαйHинг остановлен'}\n\n"
+        f"{'🟢 майнинг активен' if ms['is_m1ning'] else '🔴 майнинг остановлен'}\n\n"
         "Выбери раздел:"
     )
     await safe_edit_text(callback.message, text, reply_markup=m1ning_keyboard(), parse_mode="Markdown")
@@ -5230,7 +5230,7 @@ async def m1ning_rig_menu(callback: CallbackQuery, state: FSMContext):
     rigs = await get_user_rigs(user_id)
     max_rigs = int(await get_setting("m1ning_max_rigs", "5"))
 
-    text = "🔧 **Мои с6opки**\n\n"
+    text = "🔧 **Мои сборки**\n\n"
     buttons = []
 
     if rigs:
@@ -5249,7 +5249,7 @@ async def m1ning_rig_menu(callback: CallbackQuery, state: FSMContext):
                 callback_data=f"mrig_{rig['id']}"
             )])
     else:
-        text += "📭 У тебя нет с6opков!\n\n"
+        text += "📭 У тебя нет сборков!\n\n"
 
     # Кнопка сборки если есть компоненты и не достигнут лимит
     has_v1deo = any(v['comp_type'] == 'v1deo' and v['quantity'] > v.get('is_broken', 0) for v in inv.values())
@@ -5257,9 +5257,9 @@ async def m1ning_rig_menu(callback: CallbackQuery, state: FSMContext):
     has_mobo = any(v['comp_type'] == 'mobo' and v['quantity'] > v.get('is_broken', 0) for v in inv.values())
 
     if has_v1deo and has_psu and has_mobo and len(rigs) < max_rigs:
-        buttons.append([InlineKeyboardButton(text="➕ Собрать с6opк", callback_data="mrig_build", style=ButtonStyle.SUCCESS)])
+        buttons.append([InlineKeyboardButton(text="➕ Собрать риг", callback_data="mrig_build", style=ButtonStyle.SUCCESS)])
     elif len(rigs) >= max_rigs:
-        text += f"⚠️ Максимум с6opков: {max_rigs}\n"
+        text += f"⚠️ Максимум сборков: {max_rigs}\n"
 
     buttons.append([InlineKeyboardButton(text="📦 Мои комплектующие", callback_data="m1ning_parts")])
     buttons.append([InlineKeyboardButton(text="Назад ◀️◀️◀️", callback_data="m1ning")])
@@ -5347,7 +5347,7 @@ async def m1ning_repair(callback: CallbackQuery):
 
 @router.callback_query(lambda c: c.data and c.data.startswith("mrig_") and not c.data.startswith("mrig_build") and c.data[5:].isdigit())
 async def m1ning_rig_detail(callback: CallbackQuery):
-    """Детали с6opка — включить/выключить, удалить."""
+    """Детали рига — включить/выключить, удалить."""
     s6orka_id = int(callback.data.replace("mrig_", ""))
     user_id = callback.from_user.id
 
@@ -5386,7 +5386,7 @@ async def m1ning_rig_detail(callback: CallbackQuery):
         buttons.append([InlineKeyboardButton(text="⏹ Остановить", callback_data=f"mrigstop_{s6orka_id}", style=ButtonStyle.DANGER)])
     else:
         buttons.append([InlineKeyboardButton(text="▶️ Запустить", callback_data=f"mrigstart_{s6orka_id}", style=ButtonStyle.SUCCESS)])
-    buttons.append([InlineKeyboardButton(text="🗑 Разобрать с6opк", callback_data=f"mrigdel_{s6orka_id}", style=ButtonStyle.DANGER)])
+    buttons.append([InlineKeyboardButton(text="🗑 Разобрать риг", callback_data=f"mrigdel_{s6orka_id}", style=ButtonStyle.DANGER)])
     buttons.append([InlineKeyboardButton(text="Назад ◀️◀️◀️", callback_data="m1ning_rig")])
     await safe_edit_text(callback.message, text, reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons), parse_mode="Markdown")
 
@@ -5415,7 +5415,7 @@ async def m1ning_rig_stop(callback: CallbackQuery):
 
 @router.callback_query(F.data.startswith("mrigdel_"))
 async def m1ning_rig_delete(callback: CallbackQuery):
-    """Разобрать с6opк — компоненты возвращаются в инвентарь."""
+    """Разобрать риг — компоненты возвращаются в инвентарь."""
     s6orka_id = int(callback.data.replace("mrigdel_", ""))
     user_id = callback.from_user.id
 
@@ -5451,7 +5451,7 @@ async def m1ning_rig_delete(callback: CallbackQuery):
 
 @router.callback_query(F.data == "mrig_build")
 async def m1ning_rig_build_start(callback: CallbackQuery, state: FSMContext):
-    """Начало сборки с6opка — выбор видеокарты."""
+    """Начало сборки рига — выбор видеокарты."""
     user_id = callback.from_user.id
     inv = await get_m1ning_inventory(user_id)
 
@@ -5460,7 +5460,7 @@ async def m1ning_rig_build_start(callback: CallbackQuery, state: FSMContext):
         await callback.answer("❌ Нет видеокарт! Купи на рынке.", show_alert=True)
         return
 
-    text = "🖥 **Сборка с6opка — Шаг 1/4**\n\nВыбери видеокарту:"
+    text = "🖥 **Сборка рига — Шаг 1/4**\n\nВыбери видеокарту:"
     buttons = []
     for comp_id, item in v1deos:
         async with aiosqlite.connect(DB_NAME) as db:
@@ -5488,7 +5488,7 @@ async def m1ning_rig_build_psu(callback: CallbackQuery, state: FSMContext):
         await callback.answer("❌ Нет блоков питания! Купи на рынке.", show_alert=True)
         return
 
-    text = "🔌 **Сборка с6opка — Шаг 2/4**\n\nВыбери блок питания:"
+    text = "🔌 **Сборка рига — Шаг 2/4**\n\nВыбери блок питания:"
     buttons = []
     for comp_id, item in psus:
         async with aiosqlite.connect(DB_NAME) as db:
@@ -5516,7 +5516,7 @@ async def m1ning_rig_build_mobo(callback: CallbackQuery, state: FSMContext):
         await callback.answer("❌ Нет мат. плат! Купи на рынке.", show_alert=True)
         return
 
-    text = "🔲 **Сборка с6opка — Шаг 3/4**\n\nВыбери материнскую плату:"
+    text = "🔲 **Сборка рига — Шаг 3/4**\n\nВыбери материнскую плату:"
     buttons = []
     for comp_id, item in mobos:
         buttons.append([InlineKeyboardButton(
@@ -5536,7 +5536,7 @@ async def m1ning_rig_build_cooling(callback: CallbackQuery, state: FSMContext):
     inv = await get_m1ning_inventory(user_id)
     coolings = [(k, v) for k, v in inv.items() if v['comp_type'] == 'cooling' and v['quantity'] > v.get('is_broken', 0)]
 
-    text = "❄️ **Сборка с6opка — Шаг 4/4**\n\nВыбери охлаждение (или пропусти):"
+    text = "❄️ **Сборка рига — Шаг 4/4**\n\nВыбери охлаждение (или пропусти):"
     buttons = []
     for comp_id, item in coolings:
         async with aiosqlite.connect(DB_NAME) as db:
@@ -5555,7 +5555,7 @@ async def m1ning_rig_build_cooling(callback: CallbackQuery, state: FSMContext):
 
 @router.callback_query(F.data.startswith("mbuild_cool_"))
 async def m1ning_rig_build_finish(callback: CallbackQuery, state: FSMContext):
-    """Финальный шаг сборки — создаём с6opк."""
+    """Финальный шаг — создаём риг."""
     cooling_id = int(callback.data.replace("mbuild_cool_", ""))
     if cooling_id == 0:
         cooling_id = None
@@ -5571,7 +5571,7 @@ async def m1ning_rig_build_finish(callback: CallbackQuery, state: FSMContext):
         await callback.answer("❌ Ошибка сборки!", show_alert=True)
         return
 
-    # Всё в одной транзакции — списываем компоненты и создаём с6opк
+    # Всё в одной транзакции — списываем компоненты и создаём риг
     async with aiosqlite.connect(DB_NAME) as db:
         # Списываем в1дeo
         cursor = await db.execute(
@@ -5610,16 +5610,16 @@ async def m1ning_rig_build_finish(callback: CallbackQuery, state: FSMContext):
                 await callback.answer("❌ Охлаждение недоступно!", show_alert=True)
                 return
 
-        # Проверяем лимит с6opков
+        # Проверяем лимит сборков
         max_rigs = int(await get_setting("m1ning_max_rigs", "5"))
         async with db.execute("SELECT COUNT(*) FROM m1ning_rigs WHERE user_id = ?", (user_id,)) as cursor:
             rig_count = (await cursor.fetchone())[0]
         if rig_count >= max_rigs:
             await db.rollback()
-            await callback.answer(f"❌ Максимум с6opков: {max_rigs}!", show_alert=True)
+            await callback.answer(f"❌ Максимум сборков: {max_rigs}!", show_alert=True)
             return
 
-        # Создаём с6opк
+        # Создаём сборк
         await db.execute('''
             INSERT INTO m1ning_rigs (user_id, v1deo_id, psu_id, mobo_id, cooling_id, is_active, created_at)
             VALUES (?, ?, ?, ?, ?, 0, ?)
@@ -5629,7 +5629,7 @@ async def m1ning_rig_build_finish(callback: CallbackQuery, state: FSMContext):
         await db.execute("DELETE FROM m1ning_inventory WHERE quantity <= 0")
         await db.commit()
 
-    await callback.answer("✅ Риг собран! Запусти его в меню с6opков.", show_alert=True)
+    await callback.answer("✅ Риг собран! Запусти его в меню сборков.", show_alert=True)
     await m1ning_rig_menu(callback, None)
 
 
@@ -5660,24 +5660,24 @@ async def m1ning_dashboard(callback: CallbackQuery):
     income_per_hour = coin_per_hour * rate
 
     text = (
-        "⚡ **мαйHинг — Панель управления**\n\n"
-        f"💰 бNтk0ины: **{ms['b1tcoins']:.2f}**\n"
+        "⚡ **майнинг — Панель управления**\n\n"
+        f"💰 биткоины: **{ms['b1tcoins']:.2f}**\n"
         f"📊 Всего намайнено: {ms['total_m1ned']:.2f}\n\n"
-        f"🔧 Активных с6opков: **{len(active_rigs)}/{len(rigs)}**\n"
+        f"🔧 Активных сборков: **{len(active_rigs)}/{len(rigs)}**\n"
         f"📈 Общий хешрейт: **{total_mh} MH/s**\n"
         f"⚡ Потребление: **{total_power}W**\n"
         f"💸 Электричество: **{elec_cost:.0f} Ежидзиков/час**\n\n"
-        f"📊 Курс: 1 бNтk0ин = {rate:.2f} Ежидзиков\n"
-        f"💰 Примерно: ~{coin_per_hour:.2f} бNтk0инов/час\n"
+        f"📊 Курс: 1 биткоин = {rate:.2f} Ежидзиков\n"
+        f"💰 Примерно: ~{coin_per_hour:.2f} биткоинов/час\n"
         f"💵 ~{income_per_hour:.1f} Ежидзиков/час\n"
     )
 
     if ms['is_m1ning'] and active_rigs:
-        text += f"\n🟢 **мαйHинг работает!**"
+        text += f"\n🟢 **майнинг работает!**"
     elif not active_rigs:
-        text += f"\n⚠️ Нет активных с6opков!"
+        text += f"\n⚠️ Нет активных сборков!"
     else:
-        text += f"\n🔴 **мαйHинг остановлен**"
+        text += f"\n🔴 **майнинг остановлен**"
 
     buttons = []
     if active_rigs:
@@ -5697,7 +5697,7 @@ async def m1ning_start_all(callback: CallbackQuery):
         await db.execute("UPDATE m1ning_rigs SET is_active = 1 WHERE user_id = ?", (user_id,))
         await db.execute("UPDATE m1ning_state SET is_m1ning = 1 WHERE user_id = ?", (user_id,))
         await db.commit()
-    await callback.answer("▶️ Все с6opки запущены!", show_alert=False)
+    await callback.answer("▶️ Все сборки запущены!", show_alert=False)
     await m1ning_dashboard(callback)
 
 
@@ -5708,7 +5708,7 @@ async def m1ning_stop_all(callback: CallbackQuery):
         await db.execute("UPDATE m1ning_rigs SET is_active = 0 WHERE user_id = ?", (user_id,))
         await db.execute("UPDATE m1ning_state SET is_m1ning = 0 WHERE user_id = ?", (user_id,))
         await db.commit()
-    await callback.answer("⏹ Все с6opки остановлены!", show_alert=False)
+    await callback.answer("⏹ Все сборки остановлены!", show_alert=False)
     await m1ning_dashboard(callback)
 
 
@@ -5723,11 +5723,11 @@ async def m1ning_exchange_menu(callback: CallbackQuery, state: FSMContext):
     diamond_rate = rate / 135  # 45 Ежидзиков = 1 Кожа, 3 Кожи = 1 Алмаз → 135 Ежидзиков ≈ 1 Алмаз
 
     text = (
-        "💱 **Обмен бNтk0инов**\n\n"
-        f"💰 У тебя: **{ms['b1tcoins']:.2f}** бNтk0инов\n\n"
+        "💱 **Обмен биткоинов**\n\n"
+        f"💰 У тебя: **{ms['b1tcoins']:.2f}** биткоинов\n\n"
         f"📊 Текущие курсы (с учётом комиссии 10%):\n"
-        f"  • 1 бNтk0ин → {rate * 0.9:.2f} Ежидзиков\n"
-        f"  • 1 бNтk0ин → {diamond_rate * 0.9:.4f} Алмазов\n\n"
+        f"  • 1 биткоин → {rate * 0.9:.2f} Ежидзиков\n"
+        f"  • 1 биткоин → {diamond_rate * 0.9:.4f} Алмазов\n\n"
         f"⚠️ Комиссия 10% при обмене"
     )
 
@@ -5742,7 +5742,7 @@ async def m1ning_exchange_menu(callback: CallbackQuery, state: FSMContext):
             callback_data="mex_diamonds"
         )])
     else:
-        text += "\n\n📭 Недостаточно бNтk0инов (минимум 1)"
+        text += "\n\n📭 Недостаточно биткоинов (минимум 1)"
 
     buttons.append([InlineKeyboardButton(text="Назад ◀️◀️◀️", callback_data="m1ning")])
     await safe_edit_text(callback.message, text, reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons), parse_mode="Markdown")
@@ -5758,7 +5758,7 @@ async def m1ning_exchange_action(callback: CallbackQuery, state: FSMContext):
     curr_label = "Ежидзики" if currency == "balance" else "Алмазы"
     await safe_edit_text(
         callback.message,
-        f"💱 **Обмен на {curr_label}**\n\nВведи количество бNтk0инов для обмена:",
+        f"💱 **Обмен на {curr_label}**\n\nВведи количество биткоинов для обмена:",
         reply_markup=back_button("m1ning_exchange"),
         parse_mode="Markdown"
     )
@@ -5781,7 +5781,7 @@ async def m1ning_exchange_process(message: Message, state: FSMContext):
 
     ms = await get_m1ning_state(user_id)
     if ms['b1tcoins'] < amount:
-        await message.answer(f"❌ У тебя только {ms['b1tcoins']:.2f} бNтk0инов!")
+        await message.answer(f"❌ У тебя только {ms['b1tcoins']:.2f} биткоинов!")
         return
 
     rate = await get_b1tcoin_rate()
@@ -5797,7 +5797,7 @@ async def m1ning_exchange_process(message: Message, state: FSMContext):
             await db.execute("UPDATE m1ning_state SET b1tcoins = b1tcoins - ?, total_m1ned = total_m1ned WHERE user_id = ?", (amount, user_id))
             await db.execute("UPDATE users SET balance = balance + ? WHERE user_id = ?", (reward, user_id))
             await db.commit()
-        await message.answer(f"✅ Обменяно {amount:.2f} бNтk0инов → {reward} Ежидзиков👍\n📉 Комиссия: {commission:.2f}")
+        await message.answer(f"✅ Обменяно {amount:.2f} биткоинов → {reward} Ежидзиков👍\n📉 Комиссия: {commission:.2f}")
     elif currency == 'diamonds':
         diamond_rate = rate / 135
         reward = round(net * diamond_rate)
@@ -5808,7 +5808,7 @@ async def m1ning_exchange_process(message: Message, state: FSMContext):
             await db.execute("UPDATE m1ning_state SET b1tcoins = b1tcoins - ?, total_m1ned = total_m1ned WHERE user_id = ?", (amount, user_id))
             await db.execute("UPDATE users SET diamonds = diamonds + ? WHERE user_id = ?", (reward, user_id))
             await db.commit()
-        await message.answer(f"✅ Обменяно {amount:.2f} бNтk0инов → {reward} 💎 Алмазов\n📉 Комиссия: {commission:.2f}")
+        await message.answer(f"✅ Обменяно {amount:.2f} биткоинов → {reward} 💎 Алмазов\n📉 Комиссия: {commission:.2f}")
 
 
 # --- STUB: ИИ-ЕЖ ---
@@ -9893,7 +9893,7 @@ async def _generate_balance_image(user_id: int, user: dict) -> str | None:
     tw = bbox[2] - bbox[0]
     draw.text(((width - tw) / 2, 40), title, fill=(255, 220, 100), font=font_title)
     
-    # Получаем бNтk0ины
+    # Получаем биткоины
     async with aiosqlite.connect(DB_NAME) as db:
         async with db.execute("SELECT b1tcoins FROM m1ning_state WHERE user_id = ?", (user_id,)) as cursor:
             row = await cursor.fetchone()
@@ -9904,7 +9904,7 @@ async def _generate_balance_image(user_id: int, user: dict) -> str | None:
         ("💰 Ежидзики", f"{user['balance']}", (255, 215, 0)),
         ("🐘 Кожа слона", f"{user['elephant_skin']}", (200, 180, 140)),
         ("💎 Алмазы", f"{user['diamonds']}", (100, 200, 255)),
-        ("🪙 бNтk0ины", f"{b1tcoins:.1f}", (255, 150, 50)),
+        ("🪙 биткоины", f"{b1tcoins:.1f}", (255, 150, 50)),
     ]
     
     y_offset = 120
@@ -10157,7 +10157,7 @@ async def inline_query_handler(query: InlineQuery):
                 except Exception as e:
                     print(f"⚠️ Ошибка генерации картинки баланса: {e}")
             
-            # Получаем бNтk0ины
+            # Получаем биткоины
             async with aiosqlite.connect(DB_NAME) as db:
                 async with db.execute("SELECT b1tcoins FROM m1ning_state WHERE user_id = ?", (user_id,)) as cursor:
                     row = await cursor.fetchone()
@@ -10168,7 +10168,7 @@ async def inline_query_handler(query: InlineQuery):
                 f"💰 Ежидзики: {user['balance']}👍\n"
                 f"🐘 Кожа слона: {user['elephant_skin']}\n"
                 f"💎 Алмазы: {user['diamonds']}\n"
-                f"🪙 бNтk0ины: {b1tcoins:.1f}"
+                f"🪙 биткоины: {b1tcoins:.1f}"
             )
             
             if img_url:
@@ -10177,7 +10177,7 @@ async def inline_query_handler(query: InlineQuery):
                     photo_url=img_url,
                     thumbnail_url=img_url,
                     title=f"💰 Баланс: {user['balance']} ЕЖ",
-                    description=f"Кожа: {user['elephant_skin']} | Алмазы: {user['diamonds']} | бNтk0ины: {b1tcoins:.1f}",
+                    description=f"Кожа: {user['elephant_skin']} | Алмазы: {user['diamonds']} | биткоины: {b1tcoins:.1f}",
                     caption=msg_text,
                     reply_markup=InlineKeyboardMarkup(inline_keyboard=[
                         [InlineKeyboardButton(text="🦔 Открыть бота", url=f"https://t.me/{bot_username}")]
@@ -11274,7 +11274,7 @@ async def ant_income_loop():
 
 
 async def m1ning_loop():
-    """Фоновая задача мαйHинга — раз в час."""
+    """Фоновая задача майнинга — раз в час."""
     while True:
         try:
             elec_rate = float(await get_setting("m1ning_electricity_rate", "1"))
@@ -11286,7 +11286,7 @@ async def m1ning_loop():
 
                 for m1ner in m1ners:
                     user_id = m1ner['user_id']
-                    # Получаем активные с6opки
+                    # Получаем активные сборки
                     async with db.execute("SELECT * FROM m1ning_rigs WHERE user_id = ? AND is_active = 1", (user_id,)) as cursor:
                         rigs = await cursor.fetchall()
 
@@ -11321,7 +11321,7 @@ async def m1ning_loop():
                     async with db.execute("SELECT balance FROM users WHERE user_id = ?", (user_id,)) as cursor:
                         user = await cursor.fetchone()
                     if not user or user['balance'] < elec_cost:
-                        # Не хватает на электричество — останавливаем мαйHинг
+                        # Не хватает на электричество — останавливаем майнинг
                         await db.execute("UPDATE m1ning_state SET is_m1ning = 0 WHERE user_id = ?", (user_id,))
                         await db.execute("UPDATE m1ning_rigs SET is_active = 0 WHERE user_id = ?", (user_id,))
                         continue
@@ -11336,9 +11336,9 @@ async def m1ning_loop():
                     break_chance = 0.05 * (1 - max_break_reduction)
                     broken_msg = ""
                     if random.random() < break_chance:
-                        # Случайный активный с6opк ломается
+                        # Случайный активный сборк ломается
                         broken_rig = random.choice(rigs)
-                        # Отмечаем видеокарту как сломанную в с6opке
+                        # Отмечаем видеокарту как сломанную в сборке
                         await db.execute("UPDATE m1ning_rigs SET is_active = 0 WHERE id = ?", (broken_rig['id'],))
                         # Добавляем сломанную единицу в инвентарь
                         await db.execute('''
@@ -11348,7 +11348,7 @@ async def m1ning_loop():
                         ''', (user_id, broken_rig['v1deo_id']))
                         broken_msg = " 💥 Поломка!"
 
-                    # Начисляем бNтk0ины
+                    # Начисляем биткоины
                     await db.execute(
                         "UPDATE m1ning_state SET b1tcoins = b1tcoins + ?, total_m1ned = total_m1ned + ?, last_mine = ? WHERE user_id = ?",
                         (coins_mined, coins_mined, datetime.now().strftime("%Y-%m-%d %H:%M:%S"), user_id)
@@ -11357,7 +11357,7 @@ async def m1ning_loop():
                 await db.commit()
 
         except Exception as e:
-            print(f"Ошибка мαйHинг-цикла: {e}")
+            print(f"Ошибка майнинг-цикла: {e}")
         await asyncio.sleep(3600)
 
 
