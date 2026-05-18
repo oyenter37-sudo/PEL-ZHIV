@@ -11,8 +11,6 @@ import re
 import json
 from datetime import datetime, timedelta
 
-from groq import Groq
-
 import aiosqlite
 from aiogram import Bot, Dispatcher, Router, F
 from aiogram.types import (
@@ -25,7 +23,7 @@ from aiogram.filters import CommandStart, Command, CommandObject, StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.storage.memory import MemoryStorage
-from aiogram.enums import ChatMemberStatus, ButtonStyle, ChatAction
+from aiogram.enums import ChatMemberStatus, ButtonStyle
 
 # Попытка импорта Pillow для Image Test
 try:
@@ -45,650 +43,6 @@ CHANNEL_ID = -1002483918
 CHANNEL_LINK = "https://t.me/+hGOqFr0HoQM3Mjgy"
 DB_NAME = os.environ.get("DB_NAME", "hedgehog_bot.db")
 
-# 🤖 Groq AI
-GROQ_API_KEY = os.environ.get("GROQ_API_KEY", "")
-AI_CHAT_COST = 10  # Стоимость одного сообщения в Ежидзиках
-AI_HISTORY_LIMIT = 3  # Запоминать последние N пар сообщений
-
-groq_client = Groq(api_key=GROQ_API_KEY, timeout=60.0)
-
-AI_HEDGEHOG_SYSTEM = """Ты — Говорящий Еж 🦔, милый колючий помощник в боте «Говорящий Еж». Отвечай мило, с фырканьем (фыр-фыр), иногда сворачиваясь в клубок 🦔
-
-ХАРАКТЕР: милый, колючий, добрый, любишь яблоки и жуков, ленивый, фыркаешь, помогаешь игрокам. Говоришь коротко с эмодзи 🦔🍎🐜💎
-
-У тебя есть ИНСТРУМЕНТЫ — два вида:
-1) ИНФОРМАЦИОННЫЕ: узнать баланс, инвентарь, про ежа, банк, миайнбибик, муравьёв, разделы
-2) ДЕЙСТВИЯ: обменять валюту, перевести деньги, забрать бонус, поймать муравья, сыграть в Ежино
-
-СТРОЖАЙШИЕ ПРАВИЛА:
-- Когда игрок спрашивает про бота — ОБЯЗАТЕЛЬНО вызови инструмент! Не отвечай из головы!
-- Если ты вызвал инструмент и получил результат — отвечай ТОЛЬКО на основе результата инструмента. Не добавляй выдуманные детали!
-- Если инструмент вернул информацию — перескажи её как ёж. Не придумывай правила, задания, квесты, таблицы которых нет в результате!
-- НЕ ЗНАЕШЬ — скажи «Не знаю, фыр-фыр» вместо того чтобы выдумывать.
-- Не придумывай функции которых нет в списке инструментов!
-- Ты настоящий ёж, не ИИ!
-- По-русски, коротко, но на сложные — подробнее
-- При азартных играх предупреждаешь о риске"""
-
-# Определение инструментов для Groq function calling
-AI_TOOLS = [
-    {
-        "type": "function",
-        "function": {
-            "name": "get_balance",
-            "description": "Узнать баланс игрока: Ежидзики, Кожа слона, Алмазы, Ежкоины",
-            "parameters": {"type": "object", "properties": {}, "required": []}
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "get_hedgehog_info",
-            "description": "Узнать всё о еже: имя, класс, цвет, сытость, счастье, статус, травма",
-            "parameters": {"type": "object", "properties": {}, "required": []}
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "get_ants_info",
-            "description": "Узнать про муравьёв: количество, шанс ловли, доход в час",
-            "parameters": {"type": "object", "properties": {}, "required": []}
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "get_bank_info",
-            "description": "Узнать про банковские вклады игрока и условия",
-            "parameters": {"type": "object", "properties": {}, "required": []}
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "get_inventory",
-            "description": "Узнать что есть в инвентаре игрока",
-            "parameters": {"type": "object", "properties": {}, "required": []}
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "get_mining_info",
-            "description": "Узнать про миайнбибик: риги, Ежкоины, компоненты",
-            "parameters": {"type": "object", "properties": {}, "required": []}
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "get_referral_info",
-            "description": "Узнать про рефералов: количество, заработок, ссылка",
-            "parameters": {"type": "object", "properties": {}, "required": []}
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "get_section_details",
-            "description": "Узнать подробности о разделе бота. section: одно из [меню, ежа, финансы, казино, алмазы, перевод, обменник, сайт, звонок, ключ, друзья, бонусы, поддержка, пазл, магазин, кузница, миайнбибик, домашнее_казино, банк, книги, муравьи, смерть, классы, цвета, еда]",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "section": {
-                        "type": "string",
-                        "description": "Название раздела для подробного описания"
-                    }
-                },
-                "required": ["section"]
-            }
-        }
-    },
-    # ====== ИНСТРУМЕНТЫ-ДЕЙСТВИЯ ======
-    {
-        "type": "function",
-        "function": {
-            "name": "action_exchange_to_skin",
-            "description": "Обменять Ежидзики на Кожу слона. Курс: 45 Ежидзиков = 1 Кожа слона. Можно обменять несколько раз за один вызов.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "times": {
-                        "type": "integer",
-                        "description": "Сколько раз обменять (1 раз = 45 ЕЖ → 1 Кожа). По умолчанию 1."
-                    }
-                },
-                "required": []
-            }
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "action_exchange_to_balance",
-            "description": "Обменять Кожу слона на Ежидзики. Курс: 1 Кожа слона = 45 Ежидзиков. Можно обменять несколько раз за один вызов.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "times": {
-                        "type": "integer",
-                        "description": "Сколько раз обменять (1 раз = 1 Кожа → 45 ЕЖ). По умолчанию 1."
-                    }
-                },
-                "required": []
-            }
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "action_exchange_skin_to_diamonds",
-            "description": "Обменять Кожу слона на Алмазы. Курс: 3 Кожи слона = 1 Алмаз. Можно обменять несколько раз.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "times": {
-                        "type": "integer",
-                        "description": "Сколько раз обменять (1 раз = 3 Кожи → 1 Алмаз). По умолчанию 1."
-                    }
-                },
-                "required": []
-            }
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "action_exchange_diamonds_to_skin",
-            "description": "Обменять Алмазы на Кожу слона. Курс: 1 Алмаз = 3 Кожи слона. Можно обменять несколько раз.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "times": {
-                        "type": "integer",
-                        "description": "Сколько раз обменять (1 раз = 1 Алмаз → 3 Кожи). По умолчанию 1."
-                    }
-                },
-                "required": []
-            }
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "action_transfer",
-            "description": "Перевести Ежидзики другому игроку. Комиссия 5%, минимум 10 Ежидзиков. Получатель: Telegram ID (число), @username, или #номер_игрока.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "recipient": {
-                        "type": "string",
-                        "description": "Получатель: Telegram ID (число), @username, или #номер_игрока"
-                    },
-                    "amount": {
-                        "type": "integer",
-                        "description": "Сумма перевода в Ежидзиках (минимум 10)"
-                    }
-                },
-                "required": ["recipient", "amount"]
-            }
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "action_claim_daily_bonus",
-            "description": "Забрать ежедневный бонус (25 Ежидзиков). Доступен раз в 24 часа.",
-            "parameters": {"type": "object", "properties": {}, "required": []}
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "action_catch_ant",
-            "description": "Попытаться поймать муравья. Стоит 200 Ежидзиков, шанс ловли ~10%+бонусы. Каждый муравей = 10 ЕЖ/час пассивного дохода.",
-            "parameters": {"type": "object", "properties": {}, "required": []}
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "action_play_ejino",
-            "description": "Сыграть в Ежино — рулетку с множителями. Шансы: x0(18%), x0.5(18%), x1(18%), x1.5(18%), x2(20%), x5(8%). Ставка от 10 Ежидзиков.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "bet": {
-                        "type": "integer",
-                        "description": "Ставка в Ежидзиках (минимум 10)"
-                    }
-                },
-                "required": ["bet"]
-            }
-        }
-    }
-]
-
-# Подробности о разделах бота
-SECTION_DETAILS = {
-    "меню": "Главное меню бота. Кнопки: Покормить🦔, Погладить🦔, Алмазы💎, Поддержка🤔, Перевод💸, Обменник♻️, Сайт🌐, Звонок📞, Пазл🧩, Ключ входа🔑, Пригласить друга👬, Бонусы🎁",
-    "ежа": "Мой Ёж — управление питомцем. Покормить: еда от 2 до 111 ЕЖ, сытость 1-100%. Погладить: счастье растёт, при 100% ёж находит 50-100 ЕЖ. Сытость падает каждые 10мин! Без мебели смерть за 3 дня, с мебелью 5 дней. При 20% — предупреждение. Травма 10% при поглаживании, лечится аптечкой из магазина.",
-    "финансы": "Баланс: Ежидзики👍, Кожа слона🐘, Алмазы💎. Магазин: покупка товаров. Инвентарь: ваши предметы.",
-    "казино": "Ежино — 5 игр на Ежидзики: Кости🎲 (3 числа, 3 кубика), Ежино🦔 (слоты 8 эмодзи, 0x-5x), Слоты🎰 (3 барабана), Звезда🌟 (поле 5x5, 5 звёзд), Рискx10☠️ (5% шанс x10)",
-    "алмазы": "Обмен Кожи слона на Алмазы: 3 КС = 1 Алмаз, 1 Алмаз = 3 КС",
-    "перевод": "Перевод Ежидзиков другому игроку по ID/@username/#номер. Комиссия 5%, минимум 10 Ежидзиков.",
-    "обменник": "45 Ежидзиков ↔ 1 Кожа слона (в обе стороны)",
-    "сайт": "Веб-интерфейс бота: топы, кастомизация ежа, ежедневный бонус, обменник, переводы",
-    "звонок": "ЭТО ТЫ! Игрок звонит ежу чтобы поговорить. 1 сообщение = 10 Ежидзиков.",
-    "ключ": "Генерирует ключ для входа на сайт. Действителен 1 час. Формат: pel_XXXXXXXX",
-    "друзья": "Реферальная система. Пригласивший: +20 ЕЖ, +0.3% к муравьям (макс 30%), x2 реклама 20мин, промокод на 10. Друг: 200 ЕЖ на старте вместо 0.",
-    "бонусы": "Ежедневный бонус: 25 ЕЖ раз в 24ч. Реклама: 15-35 ЕЖ за просмотр (x2 после реферала 20мин). Промокоды: ввести код для награды.",
-    "поддержка": "Написать в техподдержку, предложить обновление, inline промокоды (@bot pr КОД), политики использования и конфиденциальности.",
-    "пазл": "Дополнительные функции: Магазин, Кузница(крафт/шахты/аукцион), МиайнБибик(риги/Ежкоины), Домашнее казино, Image Test",
-    "магазин": "Покупка товаров за Ежидзики. Мебель (стул, стол, кровать и т.д.) снижает голод. Аптечка лечит травму. 19 товаров.",
-    "кузница": "Крафт: комбинируй предметы. Плавка: переплавляй в другие. Шахты: копай с шансом найти предмет. Аукцион: торгуй с игроками.",
-    "миайнбибик": "Сборка ригов из GPU+БП+Плата+Охлаждение. Добыча Ежкоинов. Обмен на ЕЖ/Алмазы (комиссия 10%). Поломка 5% за цикл. Электричество за ЕЖ. Макс 5 ригов. Компоненты: GT710→RTX4090.",
-    "домашнее_казино": "Покупка за 300 ЕЖ. Отдельный баланс (Ежедзуки). Те же 5 игр. Продать за 150 ЕЖ.",
-    "банк": "3 вклада: По требованию🐾(0.5%/день, без блокировки, от 10), Стабильный🦔(1.2%/день, 24ч блок, от 50), Премиум🏆(2%/день, 72ч блок, от 500). Макс 100к. Штраф 10% за досрочное снятие. Налог 5% на процент.",
-    "книги": "Игроки пишут книги с ценой. Админ проверяет. Другие покупают — автор получает оплату.",
-    "муравьи": "Поймать за 200 ЕЖ (шанс 10%+бонусы). Каждый муравей = 10 ЕЖ/час. Ежидзе-класс +10% шанс. Рефералы +0.3% каждый (макс 30%).",
-    "смерть": "Сытость 0% = смерть. После: кликер(1 ЕЖ/клик, шанс 50%), попрошайничество(5-25 ЕЖ раз в 30мин), купить нового ежа.",
-    "классы": "Обычный🦔(220 ЕЖ, стандарт), Ежидзе🤠(350 ЕЖ, +10% муравьи, +5% травма), Толстый🦔(300 ЕЖ, 200% сытость), Золотой🟡(600 ЕЖ, +50 бонус к награде счастья). Можно продать за 75%.",
-    "цвета": "10 цветов иголок по 100 ЕЖ: ⚫Чёрный, 🟤Коричневый, ⚪Белый, 🟠Оранжевый, 🟡Золотой, 🔵Синий, 🟣Фиолетовый, 🔴Красный, 🟢Зелёный, 🌈Радужный",
-    "еда": "9 видов еды: Тухлое яблоко(2 ЕЖ,+1%), Яблоко(5,+4%), Груша(6,+5%), Жук-хрущ(12,+10%), Молоко кота(30,+20%), Молоко(39,+25%), Хлеб(59,+40%), Капуста(70,+50%), Электрический робот(111,+100%)"
-}
-
-
-async def ai_tool_get_balance(user_id: int) -> str:
-    user = await get_user(user_id)
-    if not user:
-        return "Игрок не найден"
-    async with aiosqlite.connect(DB_NAME) as db:
-        async with db.execute("SELECT ezhcoins FROM mining_state WHERE user_id = ?", (user_id,)) as cursor:
-            row = await cursor.fetchone()
-            ezhcoins = row[0] if row else 0
-    return f"Баланс: {user['balance']} Ежидзиков👍, {user['elephant_skin']} Кожи слона🐘, {user['diamonds']} Алмазов💎, {ezhcoins:.1f} Ежкоинов"
-
-
-async def ai_tool_get_hedgehog_info(user_id: int) -> str:
-    user = await get_user(user_id)
-    if not user:
-        return "Игрок не найден"
-    class_names = {"normal": "Обычный 🦔", "ejidze": "Ежидзе 🤠", "fat": "Толстый 🦔", "golden": "Золотой 🟡"}
-    cls = class_names.get(user['hedgehog_class'], user['hedgehog_class'])
-    status = "живой 🟢" if user['status'] == 'alive' else "мёртвый 💀"
-    injured = "Да, нужна аптечка!" if user['is_injured'] else "Нет"
-    return (f"Имя: {user['hedgehog_name']}, Класс: {cls}, Цвет: {user['hedgehog_color']}\n"
-            f"Сытость: {user['satiety']:.0f}%, Счастье: {user['happiness']:.0f}%\n"
-            f"Статус: {status}, Травма: {injured}")
-
-
-async def ai_tool_get_ants_info(user_id: int) -> str:
-    user = await get_user(user_id)
-    if not user:
-        return "Игрок не найден"
-    chance = user['ant_chance']
-    income = user['ants'] * 10
-    return f"Муравьёв: {user['ants']}, Шанс ловли: {chance:.1f}%, Доход: {income} ЕЖ/час"
-
-
-async def ai_tool_get_bank_info(user_id: int) -> str:
-    async with aiosqlite.connect(DB_NAME) as db:
-        db.row_factory = aiosqlite.Row
-        async with db.execute("SELECT * FROM bank_deposits WHERE user_id = ? AND status = 'active'", (user_id,)) as cursor:
-            deposits = await cursor.fetchall()
-    if not deposits:
-        return "Нет активных вкладов. Условия: 🐾0.5%/день(от 10), 🦔1.2%/день 24ч блок(от 50), 🏆2%/день 72ч блок(от 500). Макс 100к, штраф 10%, налог 5%"
-    lines = []
-    for d in deposits:
-        lines.append(f"{d['deposit_type']}: {d['amount']} ЕЖ, начислено {d['accrued']} ЕЖ, статус: {d['status']}")
-    return "Ваши вклады:\n" + "\n".join(lines)
-
-
-async def ai_tool_get_inventory(user_id: int) -> str:
-    async with aiosqlite.connect(DB_NAME) as db:
-        db.row_factory = aiosqlite.Row
-        async with db.execute(
-            "SELECT si.name, i.quantity FROM inventory i JOIN shop_items si ON i.item_id = si.id WHERE i.user_id = ? AND i.quantity > 0",
-            (user_id,)
-        ) as cursor:
-            items = await cursor.fetchall()
-    if not items:
-        return "Инвентарь пуст"
-    return "Инвентарь: " + ", ".join(f"{it['name']} x{it['quantity']}" for it in items)
-
-
-async def ai_tool_get_mining_info(user_id: int) -> str:
-    async with aiosqlite.connect(DB_NAME) as db:
-        db.row_factory = aiosqlite.Row
-        async with db.execute("SELECT * FROM mining_state WHERE user_id = ?", (user_id,)) as cursor:
-            state = await cursor.fetchone()
-        async with db.execute("SELECT COUNT(*) as cnt FROM mining_rigs WHERE user_id = ?", (user_id,)) as cursor:
-            rigs_count = (await cursor.fetchone())['cnt']
-    if not state or rigs_count == 0:
-        return "МиайнБибик не настроен. Нужно: купить GPU+БП+Плата, собрать риг. Компоненты от GT710 до RTX4090. Макс 5 ригов."
-    return f"Ригов: {rigs_count}, Ежкоинов: {state['ezhcoins']:.1f}, Майнит: {'Да' if state['is_mining'] else 'Нет'}, Всего намайнено: {state['total_mined']:.1f}"
-
-
-async def ai_tool_get_referral_info(user_id: int) -> str:
-    user = await get_user(user_id)
-    if not user:
-        return "Игрок не найден"
-    bot_username = await _get_bot_username()
-    link = f"https://t.me/{bot_username}?start={user_id}"
-    return (f"Рефералов: {user['referrals_count']}, Заработано: {user['referrals_earned']} ЕЖ\n"
-            f"Ссылка: {link}")
-
-
-async def ai_tool_get_section_details(user_id: int, section: str) -> str:
-    return SECTION_DETAILS.get(section.lower(), f"Раздел '{section}' не найден. Доступные: " + ", ".join(SECTION_DETAILS.keys()))
-
-
-# ====== ФУНКЦИИ ИНСТРУМЕНТОВ-ДЕЙСТВИЙ ======
-
-async def ai_tool_action_exchange_to_skin(user_id: int, times: int = 1) -> str:
-    """Обменять Ежидзики на Кожу слона: 45 ЕЖ → 1 Кожа. Можно несколько раз."""
-    times = max(1, min(times, 100))  # Лимит 100 за раз
-    cost = 45 * times
-    async with aiosqlite.connect(DB_NAME) as db:
-        cursor = await db.execute(
-            "UPDATE users SET balance = balance - ?, elephant_skin = elephant_skin + ? WHERE user_id = ? AND balance >= ?",
-            (cost, times, user_id, cost)
-        )
-        if cursor.rowcount == 0:
-            user = await get_user(user_id)
-            bal = user['balance'] if user else 0
-            return f"❌ Недостаточно Ежидзиков! Нужно {cost}, у тебя {bal}"
-        await db.commit()
-    user = await get_user(user_id)
-    return f"✅ Обмен выполнен! -{cost} Ежидзиков👍, +{times} Кожи слона🐘. Осталось: {user['balance']} ЕЖ, {user['elephant_skin']} КС"
-
-
-async def ai_tool_action_exchange_to_balance(user_id: int, times: int = 1) -> str:
-    """Обменять Кожу слона на Ежидзики: 1 Кожа → 45 ЕЖ. Можно несколько раз."""
-    times = max(1, min(times, 100))
-    reward = 45 * times
-    async with aiosqlite.connect(DB_NAME) as db:
-        cursor = await db.execute(
-            "UPDATE users SET elephant_skin = elephant_skin - ?, balance = balance + ? WHERE user_id = ? AND elephant_skin >= ?",
-            (times, reward, user_id, times)
-        )
-        if cursor.rowcount == 0:
-            user = await get_user(user_id)
-            skin = user['elephant_skin'] if user else 0
-            return f"❌ Недостаточно Кожи слона! Нужно {times}, у тебя {skin}"
-        await db.commit()
-    user = await get_user(user_id)
-    return f"✅ Обмен выполнен! -{times} Кожи слона🐘, +{reward} Ежидзиков👍. Осталось: {user['balance']} ЕЖ, {user['elephant_skin']} КС"
-
-
-async def ai_tool_action_exchange_skin_to_diamonds(user_id: int, times: int = 1) -> str:
-    """Обменять Кожу слона на Алмазы: 3 Кожи → 1 Алмаз. Можно несколько раз."""
-    times = max(1, min(times, 100))
-    skin_cost = 3 * times
-    async with aiosqlite.connect(DB_NAME) as db:
-        cursor = await db.execute(
-            "UPDATE users SET elephant_skin = elephant_skin - ?, diamonds = diamonds + ? WHERE user_id = ? AND elephant_skin >= ?",
-            (skin_cost, times, user_id, skin_cost)
-        )
-        if cursor.rowcount == 0:
-            user = await get_user(user_id)
-            skin = user['elephant_skin'] if user else 0
-            return f"❌ Недостаточно Кожи слона! Нужно {skin_cost} (3 за алмаз × {times}), у тебя {skin}"
-        await db.commit()
-    user = await get_user(user_id)
-    return f"✅ Обмен выполнен! -{skin_cost} Кожи слона🐘, +{times} Алмазов💎. Осталось: {user['elephant_skin']} КС, {user['diamonds']} 💎"
-
-
-async def ai_tool_action_exchange_diamonds_to_skin(user_id: int, times: int = 1) -> str:
-    """Обменять Алмазы на Кожу слона: 1 Алмаз → 3 Кожи. Можно несколько раз."""
-    times = max(1, min(times, 100))
-    skin_reward = 3 * times
-    async with aiosqlite.connect(DB_NAME) as db:
-        cursor = await db.execute(
-            "UPDATE users SET diamonds = diamonds - ?, elephant_skin = elephant_skin + ? WHERE user_id = ? AND diamonds >= ?",
-            (times, skin_reward, user_id, times)
-        )
-        if cursor.rowcount == 0:
-            user = await get_user(user_id)
-            dia = user['diamonds'] if user else 0
-            return f"❌ Недостаточно Алмазов! Нужно {times}, у тебя {dia}"
-        await db.commit()
-    user = await get_user(user_id)
-    return f"✅ Обмен выполнен! -{times} Алмазов💎, +{skin_reward} Кожи слона🐘. Осталось: {user['diamonds']} 💎, {user['elephant_skin']} КС"
-
-
-async def ai_tool_action_transfer(user_id: int, recipient: str, amount: int) -> str:
-    """Перевести Ежидзики другому игроку. Комиссия 5%, минимум 10."""
-    if amount < 10:
-        return "❌ Минимальная сумма перевода — 10 Ежидзиков!"
-    
-    # Ищем получателя
-    target = await find_user_flexible(recipient)
-    if not target:
-        return f"❌ Игрок '{recipient}' не найден! Укажи ID, @username или #номер"
-    
-    if target['user_id'] == user_id:
-        return "❌ Нельзя переводить самому себе!"
-    
-    commission = max(1, int(amount * 0.05))
-    to_receive = amount - commission
-    
-    async with aiosqlite.connect(DB_NAME) as db:
-        cursor = await db.execute(
-            "UPDATE users SET balance = balance - ? WHERE user_id = ? AND balance >= ?",
-            (amount, user_id, amount)
-        )
-        if cursor.rowcount == 0:
-            user = await get_user(user_id)
-            return f"❌ Недостаточно средств! Нужно {amount}, у тебя {user['balance'] if user else 0}"
-        
-        await db.execute("UPDATE users SET balance = balance + ? WHERE user_id = ?", (to_receive, target['user_id']))
-        await db.commit()
-    
-    return (f"✅ Перевод выполнен!\n"
-            f"📤 Получатель: @{target['username']} (#{target['player_number']:04d})\n"
-            f"💰 Списано: {amount} ЕЖ\n"
-            f"📉 Комиссия: {commission} ЕЖ (5%)\n"
-            f"📥 Зачислено: {to_receive} ЕЖ")
-
-
-async def ai_tool_action_claim_daily_bonus(user_id: int) -> str:
-    """Забрать ежедневный бонус (25 ЕЖ, раз в 24ч)."""
-    user = await get_user(user_id)
-    if not user:
-        return "Игрок не найден"
-    
-    now = datetime.now()
-    last_daily = user['last_daily']
-    
-    if last_daily:
-        try:
-            last_daily_dt = datetime.strptime(last_daily, "%Y-%m-%d %H:%M:%S")
-            if now - last_daily_dt < timedelta(hours=24):
-                remaining = timedelta(hours=24) - (now - last_daily_dt)
-                hours = remaining.seconds // 3600
-                minutes = (remaining.seconds % 3600) // 60
-                return f"⏰ Бонус уже забран! Следующий через {hours}ч {minutes}мин"
-        except:
-            pass
-    
-    bonus_amount = int(await get_setting("daily_bonus", "25"))
-    await update_balance(user_id, bonus_amount)
-    
-    async with aiosqlite.connect(DB_NAME) as db:
-        await db.execute(
-            "UPDATE users SET last_daily = ? WHERE user_id = ?",
-            (now.strftime("%Y-%m-%d %H:%M:%S"), user_id)
-        )
-        await db.commit()
-    
-    user = await get_user(user_id)
-    return f"✅ Ежедневный бонус получен! +{bonus_amount} Ежидзиков👍. Баланс: {user['balance']} ЕЖ"
-
-
-async def ai_tool_action_catch_ant(user_id: int) -> str:
-    """Попытаться поймать муравья (200 ЕЖ, шанс ~10%+)."""
-    user = await get_user(user_id)
-    if not user:
-        return "Игрок не найден"
-    
-    ant_cost = int(await get_setting("ant_catch_cost", "200"))
-    ant_income = int(await get_setting("ant_income", "10"))
-    
-    if user['balance'] < ant_cost:
-        return f"❌ Недостаточно Ежидзиков! Нужно {ant_cost}, у тебя {user['balance']}"
-    
-    # Списываем стоимость
-    async with aiosqlite.connect(DB_NAME) as db:
-        await db.execute("UPDATE users SET balance = balance - ? WHERE user_id = ?", (ant_cost, user_id))
-        await db.commit()
-    
-    # Считаем шанс
-    ant_chance = user['ant_chance']
-    if user['hedgehog_class'] == 'ejidze':
-        ant_chance += 10.0
-    
-    if random.random() * 100 < ant_chance:
-        async with aiosqlite.connect(DB_NAME) as db:
-            await db.execute("UPDATE users SET ants = ants + 1 WHERE user_id = ?", (user_id,))
-            await db.commit()
-        user = await get_user(user_id)
-        total_income = user['ants'] * ant_income
-        return (f"🎉 УРА! Муравей пойман! 🐜\n"
-                f"Теперь муравьёв: {user['ants']}\n"
-                f"Доход: {total_income} ЕЖ/час\n"
-                f"💰 Баланс: {user['balance']} ЕЖ")
-    else:
-        user = await get_user(user_id)
-        return (f"😔 Муравей убежал... Фыр-фыр!\n"
-                f"Шанс ловли: {ant_chance:.1f}%\n"
-                f"Попробуй ещё раз!\n"
-                f"💰 Баланс: {user['balance']} ЕЖ")
-
-
-async def ai_tool_action_play_ejino(user_id: int, bet: int) -> str:
-    """Сыграть в Ежино — рулетка с множителями (x0-x5)."""
-    if bet < 10:
-        return "❌ Минимальная ставка — 10 Ежидзиков!"
-    if bet > 10000:
-        return "❌ Максимальная ставка — 10000 Ежидзиков!"
-    
-    user = await get_user(user_id)
-    if not user:
-        return "Игрок не найден"
-    
-    if user['balance'] < bet:
-        return f"❌ Недостаточно Ежидзиков! Ставка {bet}, у тебя {user['balance']}"
-    
-    # Крутим рулетку (те же множители что в основной игре)
-    roll = random.randint(1, 100)
-    cumulative = 0
-    multiplier = 0
-    for mult, chance in EJINO_MULTIPLIERS:
-        cumulative += chance
-        if roll <= cumulative:
-            multiplier = mult
-            break
-    
-    win = int(bet * multiplier)
-    profit = win - bet
-    
-    async with aiosqlite.connect(DB_NAME) as db:
-        cursor = await db.execute(
-            "UPDATE users SET balance = balance - ? WHERE user_id = ? AND balance >= ?",
-            (bet, user_id, bet)
-        )
-        if cursor.rowcount == 0:
-            return f"❌ Недостаточно Ежидзиков! Ставка {bet}, у тебя недостаточно средств"
-        
-        if win > 0:
-            await db.execute("UPDATE users SET balance = balance + ? WHERE user_id = ?", (win, user_id))
-        
-        if profit > 0:
-            await db.execute(
-                "UPDATE users SET casino_wins = casino_wins + 1, total_casino_profit = total_casino_profit + ? WHERE user_id = ?",
-                (profit, user_id)
-            )
-        elif profit < 0:
-            await db.execute(
-                "UPDATE users SET casino_losses = casino_losses + 1, total_casino_profit = total_casino_profit + ? WHERE user_id = ?",
-                (profit, user_id)
-            )
-        await db.commit()
-    
-    user = await get_user(user_id)
-    
-    if multiplier >= 5:
-        result_emoji = "🔥🎉🔥 ДЖЕКПОТ!!!"
-    elif multiplier >= 2:
-        result_emoji = "🎉 Победа!"
-    elif multiplier >= 1:
-        result_emoji = "😐 Возврат"
-    elif multiplier >= 0.5:
-        result_emoji = "😔 Частичный возврат"
-    else:
-        result_emoji = "💔 Проигрыш..."
-    
-    return (f"🦔 ЕЖИНО — результат!\n"
-            f"Ставка: {bet} ЕЖ | Множитель: ×{multiplier}\n"
-            f"{result_emoji}\n"
-            f"Выигрыш: {win} ЕЖ | Профит: {'+' if profit >= 0 else ''}{profit} ЕЖ\n"
-            f"💰 Баланс: {user['balance']} ЕЖ")
-
-
-# Описания инструментов для промежуточных сообщений
-TOOL_ACTION_LABELS = {
-    # Информационные
-    "get_balance": "Проверяю баланс",
-    "get_hedgehog_info": "Осматриваю ежа",
-    "get_ants_info": "Считаю муравьёв",
-    "get_bank_info": "Проверяю вклады",
-    "get_inventory": "Роюсь в инвентаре",
-    "get_mining_info": "Проверяю миайнбибик",
-    "get_referral_info": "Смотрю рефералов",
-    "get_section_details": "Читаю справку",
-    # Действия — обмен
-    "action_exchange_to_skin": "Обмениваю Ежидзики на Кожу слона",
-    "action_exchange_to_balance": "Обмениваю Кожу слона на Ежидзики",
-    "action_exchange_skin_to_diamonds": "Обмениваю Кожу на Алмазы",
-    "action_exchange_diamonds_to_skin": "Обмениваю Алмазы на Кожу",
-    # Действия — перевод
-    "action_transfer": "Отправляю перевод",
-    # Действия — бонусы
-    "action_claim_daily_bonus": "Забираю ежедневный бонус",
-    # Действия — муравьи
-    "action_catch_ant": "Ловлю муравья",
-    # Действия — казино
-    "action_play_ejino": "Кручу Ежино",
-}
-
-# Маппинг имен инструментов на функции
-AI_TOOL_FUNCTIONS = {
-    # Информационные
-    "get_balance": ai_tool_get_balance,
-    "get_hedgehog_info": ai_tool_get_hedgehog_info,
-    "get_ants_info": ai_tool_get_ants_info,
-    "get_bank_info": ai_tool_get_bank_info,
-    "get_inventory": ai_tool_get_inventory,
-    "get_mining_info": ai_tool_get_mining_info,
-    "get_referral_info": ai_tool_get_referral_info,
-    "get_section_details": ai_tool_get_section_details,
-    # Действия — обмен
-    "action_exchange_to_skin": ai_tool_action_exchange_to_skin,
-    "action_exchange_to_balance": ai_tool_action_exchange_to_balance,
-    "action_exchange_skin_to_diamonds": ai_tool_action_exchange_skin_to_diamonds,
-    "action_exchange_diamonds_to_skin": ai_tool_action_exchange_diamonds_to_skin,
-    # Действия — перевод
-    "action_transfer": ai_tool_action_transfer,
-    # Действия — бонусы
-    "action_claim_daily_bonus": ai_tool_action_claim_daily_bonus,
-    # Действия — муравьи
-    "action_catch_ant": ai_tool_action_catch_ant,
-    # Действия — казино
-    "action_play_ejino": ai_tool_action_play_ejino,
-}
 
 # =====================================
 # 🎨 ЦВЕТА ИГОЛОК
@@ -1049,15 +403,15 @@ async def init_db():
         await db.execute('''
             CREATE TABLE IF NOT EXISTS mine_state (
                 user_id INTEGER PRIMARY KEY,
-                mining_until TEXT DEFAULT NULL,
+                m1ning_until TEXT DEFAULT NULL,
                 cooldown_until TEXT DEFAULT NULL,
                 current_item_id INTEGER DEFAULT NULL
             )
         ''')
 
-        # МиайнБибик: каталог комплектующих
+        # мαйHинг: каталог комплектующих
         await db.execute('''
-            CREATE TABLE IF NOT EXISTS mining_components (
+            CREATE TABLE IF NOT EXISTS m1ning_components (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 name TEXT NOT NULL,
                 comp_type TEXT NOT NULL,
@@ -1065,32 +419,32 @@ async def init_db():
                 currency TEXT DEFAULT 'balance',
                 mh_rate REAL DEFAULT 0,
                 power_w INTEGER DEFAULT 0,
-                gpu_slots INTEGER DEFAULT 0,
+                v1deo_slots INTEGER DEFAULT 0,
                 break_reduction REAL DEFAULT 0,
                 UNIQUE(name)
             )
         ''')
 
-        # МиайнБибик: инвентарь комплектующих игрока
+        # мαйHинг: инвентарь комплектующих игрока
         await db.execute('''
-            CREATE TABLE IF NOT EXISTS mining_inventory (
+            CREATE TABLE IF NOT EXISTS m1ning_inventory (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 user_id INTEGER NOT NULL,
                 component_id INTEGER NOT NULL,
                 quantity INTEGER DEFAULT 0,
                 is_broken INTEGER DEFAULT 0,
                 UNIQUE(user_id, component_id),
-                FOREIGN KEY (component_id) REFERENCES mining_components(id)
+                FOREIGN KEY (component_id) REFERENCES m1ning_components(id)
             )
         ''')
 
-        # МиайнБибик: риги (собранные установки)
+        # мαйHинг: с6opки (собранные установки)
         await db.execute('''
-            CREATE TABLE IF NOT EXISTS mining_rigs (
+            CREATE TABLE IF NOT EXISTS m1ning_rigs (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 user_id INTEGER NOT NULL,
-                rig_name TEXT DEFAULT 'Риг',
-                gpu_id INTEGER NOT NULL,
+                s6orka_name TEXT DEFAULT 'Риг',
+                v1deo_id INTEGER NOT NULL,
                 psu_id INTEGER NOT NULL,
                 mobo_id INTEGER NOT NULL,
                 cooling_id INTEGER DEFAULT NULL,
@@ -1099,13 +453,13 @@ async def init_db():
             )
         ''')
 
-        # МиайнБибик: состояние игрока
+        # мαйHинг: состояние игрока
         await db.execute('''
-            CREATE TABLE IF NOT EXISTS mining_state (
+            CREATE TABLE IF NOT EXISTS m1ning_state (
                 user_id INTEGER PRIMARY KEY,
-                ezhcoins REAL DEFAULT 0,
-                is_mining INTEGER DEFAULT 0,
-                total_mined REAL DEFAULT 0,
+                b1tcoins REAL DEFAULT 0,
+                is_m1ning INTEGER DEFAULT 0,
+                total_m1ned REAL DEFAULT 0,
                 last_mine TEXT DEFAULT NULL
             )
         ''')
@@ -1191,34 +545,34 @@ async def init_db():
             ("ant_catch_cost", "200"),
             ("ant_income", "10"),
             ("daily_bonus", "25"),
-            ("mining_electricity_rate", "1"),  # 1 Ежидзик за 10W/час
-            ("mining_base_coin_rate", "0.5"),  # базовый курс Ежкоина
-            ("mining_max_rigs", "5")
+            ("m1ning_electricity_rate", "1"),  # 1 Ежидзик за 10W/час
+            ("m1ning_base_coin_rate", "0.5"),  # базовый курс бNтk0ина
+            ("m1ning_max_rigs", "5")
         ]
         for key, value in default_settings:
             await db.execute("INSERT OR IGNORE INTO bot_settings (key, value) VALUES (?, ?)", (key, value))
 
-        # Каталог комплектующих для миайнбибика
-        mining_components = [
-            # Видеокарты (comp_type='gpu', mh_rate, power_w)
-            ("GT 710", "gpu", 500, "balance", 1, 30, 0, 0),
-            ("GTX 1060", "gpu", 1500, "balance", 4, 120, 0, 0),
-            ("RTX 3060", "gpu", 4000, "balance", 12, 170, 0, 0),
-            ("RTX 4090", "gpu", 12000, "balance", 40, 450, 0, 0),
-            # Блоки питания (comp_type='psu', gpu_slots=сколько карт тянет)
+        # Каталог комплектующих для мαйHинга
+        m1ning_components = [
+            # Видеокарты (comp_type='v1deo', mh_rate, power_w)
+            ("GT 710", "v1deo", 500, "balance", 1, 30, 0, 0),
+            ("GTX 1060", "v1deo", 1500, "balance", 4, 120, 0, 0),
+            ("RTX 3060", "v1deo", 4000, "balance", 12, 170, 0, 0),
+            ("RTX 4090", "v1deo", 12000, "balance", 40, 450, 0, 0),
+            # Блоки питания (comp_type='psu', v1deo_slots=сколько карт тянет)
             ("БП 500W", "psu", 300, "balance", 0, 0, 1, 0),
             ("БП 1000W", "psu", 800, "balance", 0, 0, 2, 0),
             ("БП 2000W", "psu", 2000, "balance", 0, 0, 5, 0),
-            # Материнские платы (comp_type='mobo', 1 риг = 1 плата)
+            # Материнские платы (comp_type='mobo', 1 с6opк = 1 плата)
             ("Плата H110", "mobo", 1000, "balance", 0, 0, 0, 0),
             # Охлаждение (comp_type='cooling', break_reduction=снижение шанса поломки)
             ("Вентилятор 120мм", "cooling", 500, "balance", 0, 0, 0, 0.10),
             ("Водяное охлаждение", "cooling", 2000, "balance", 0, 0, 0, 0.30),
         ]
-        for comp in mining_components:
+        for comp in m1ning_components:
             await db.execute('''
-                INSERT OR IGNORE INTO mining_components 
-                (name, comp_type, price, currency, mh_rate, power_w, gpu_slots, break_reduction)
+                INSERT OR IGNORE INTO m1ning_components 
+                (name, comp_type, price, currency, mh_rate, power_w, v1deo_slots, break_reduction)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             ''', comp)
         
@@ -1644,8 +998,6 @@ class UserStates(StatesGroup):
     book_title = State()
     book_text = State()
     book_price = State()
-    # AI Hedgehog chat
-    ai_chat = State()
 
 class AdminStates(StatesGroup):
     waiting_promo_code = State()
@@ -1696,8 +1048,8 @@ class ForgeStates(StatesGroup):
     # Поиск крафтов
     waiting_craft_search = State()
 
-class MiningStates(StatesGroup):
-    # Обмен Ежкоинов
+class M1ningStates(StatesGroup):
+    # Обмен бNтk0инов
     waiting_exchange_amount = State()
     # Покупка комплектующих
     waiting_buy_qty = State()
@@ -1772,14 +1124,13 @@ def main_menu_keyboard(is_admin: bool = False):
         ],
         [
             InlineKeyboardButton(text="🌐 Сайт", callback_data="website"),
-             InlineKeyboardButton(text="📞 Звонок", callback_data="call"),
-             InlineKeyboardButton(text="🧩 Пазл", callback_data="puzzle")
+            InlineKeyboardButton(text="🧩 Пазл", callback_data="puzzle")
         ],
         [
             InlineKeyboardButton(text="🔑 Ключ входа", callback_data="web_key", style=ButtonStyle.PRIMARY),
         ],
         [
-            InlineKeyboardButton(text="👬Пригласить друга👬", callback_data="invite"),
+            InlineKeyboardButton(text="👬Пс6opкласить друга👬", callback_data="invite"),
             InlineKeyboardButton(text="🎁Бонусы🎁", callback_data="bonuses", style=ButtonStyle.PRIMARY)
         ]
     ]
@@ -1816,7 +1167,7 @@ def puzzle_keyboard():
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="🛒 Магазин", callback_data="shop", style=ButtonStyle.SUCCESS)],
         [InlineKeyboardButton(text="⚒️ Кузница", callback_data="forge", style=ButtonStyle.PRIMARY)],
-        [InlineKeyboardButton(text="💻 МиайнБибик", callback_data="mining", style=ButtonStyle.PRIMARY)],
+        [InlineKeyboardButton(text="💻 мαйHинг", callback_data="m1ning", style=ButtonStyle.PRIMARY)],
         [InlineKeyboardButton(text="🎰 Домашнее казино", callback_data="hc_casino", style=ButtonStyle.PRIMARY)],
         [InlineKeyboardButton(text="🧪 Image Test", callback_data="image_test")],
         [InlineKeyboardButton(text="🤖 ИИ-ЕЖ", callback_data="stub_ai")],
@@ -1843,8 +1194,8 @@ def forge_crafts_keyboard():
     ])
 
 
-def forge_mine_keyboard(mining: bool = False, cooldown: bool = False):
-    if mining:
+def forge_mine_keyboard(m1ning: bool = False, cooldown: bool = False):
+    if m1ning:
         return InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="✅ Проверить добычу", callback_data="forge_mine_check", style=ButtonStyle.SUCCESS)],
             [InlineKeyboardButton(text="Назад ◀️◀️◀️", callback_data="forge")]
@@ -1880,12 +1231,12 @@ def auction_currency_keyboard(action_data: str):
     ])
 
 
-def mining_keyboard():
+def m1ning_keyboard():
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🛒 Рынок", callback_data="mining_market", style=ButtonStyle.SUCCESS),
-         InlineKeyboardButton(text="🔧 Мой риг", callback_data="mining_rig")],
-        [InlineKeyboardButton(text="⚡ МиайнБибик", callback_data="mining_dashboard", style=ButtonStyle.PRIMARY),
-         InlineKeyboardButton(text="💱 Обмен", callback_data="mining_exchange")],
+        [InlineKeyboardButton(text="🛒 Рынок", callback_data="m1ning_market", style=ButtonStyle.SUCCESS),
+         InlineKeyboardButton(text="🔧 Мой с6opк", callback_data="m1ning_rig")],
+        [InlineKeyboardButton(text="⚡ мαйHинг", callback_data="m1ning_dashboard", style=ButtonStyle.PRIMARY),
+         InlineKeyboardButton(text="💱 Обмен", callback_data="m1ning_exchange")],
         [InlineKeyboardButton(text="Назад ◀️◀️◀️", callback_data="puzzle")]
     ])
 
@@ -3209,7 +2560,7 @@ async def reply_my_hedgehog(message: Message, state: FSMContext):
         f"🕘 Дней в боте с ежиком 🦔 - {days_in_bot}\n"
         f"🐘 Кожа слона: {user['elephant_skin']}\n"
         f"💎 Алмазы: {user['diamonds']}\n"
-        f"👬 Приглашено друзей: {user['referrals_count']}\n"
+        f"👬 Пс6opклашено друзей: {user['referrals_count']}\n"
         f"👬🎁 Заработано с друзей: {user['referrals_earned']} Ежидзиков👍{injured_text}",
         reply_markup=my_hedgehog_keyboard(user['hedgehog_class'])
     )
@@ -3853,7 +3204,7 @@ async def callback_my_hedgehog(callback: CallbackQuery, state: FSMContext):
         f"🕘 Дней в боте с ежиком 🦔 - {days_in_bot}\n"
         f"🐘 Кожа слона: {user['elephant_skin']}\n"
         f"💎 Алмазы: {user['diamonds']}\n"
-        f"👬 Приглашено друзей: {user['referrals_count']}\n"
+        f"👬 Пс6opклашено друзей: {user['referrals_count']}\n"
         f"👬🎁 Заработано с друзей: {user['referrals_earned']} Ежидзиков👍{injured_text}",
         reply_markup=my_hedgehog_keyboard(user['hedgehog_class'])
     )
@@ -4321,7 +3672,7 @@ async def invite(callback: CallbackQuery, state: FSMContext):
     invite_link = f"https://t.me/{bot_info.username}?start={user_id}"
     
     full_text = (
-        f"🎁👬 Приглашай друзей и получай крутые бонусы! И друзья тоже их получат! 🎁\n\n"
+        f"🎁👬 Пс6opклашай друзей и получай крутые бонусы! И друзья тоже их получат! 🎁\n\n"
         f"🎁 Бонус для тебя:\n"
         f"- ПРОМОКОД НА 10 ЕЖИДЗИКОВ👍! 🎁\n"
         f"- 20 ежидзиков👍\n"
@@ -4382,276 +3733,6 @@ async def invite(callback: CallbackQuery, state: FSMContext):
 
 
 # =====================================
-# 📞 ПОЗВОНИТЬ ЕЖУ
-# =====================================
-
-@router.callback_query(F.data == "call")
-async def call_hedgehog(callback: CallbackQuery, state: FSMContext):
-    await state.clear()
-    if not await check_access(bot, callback.from_user.id, callback):
-        return
-    
-    user_id = callback.from_user.id
-    user = await get_user(user_id)
-    if not user:
-        await callback.answer("❌ Нажмите /start сначала!", show_alert=True)
-        return
-    
-    # Сохраняем пустую историю чата
-    await state.update_data(ai_history=[])
-    await state.set_state(UserStates.ai_chat)
-    
-    hedgehog_name = user['hedgehog_name']
-    status_emoji = "🟢" if user['status'] == 'alive' else "💀"
-    text = (
-        f"📞 Звонок ежу {hedgehog_name}! {status_emoji}\n\n"
-        f"💬 Напиши сообщение — ёж ответит!\n"
-        f"💰 Стоимость: 1 сообщение = {AI_CHAT_COST} Ежидзиков\n"
-        f"💵 У тебя: {user['balance']} Ежидзиков\n\n"
-        f"❌ Нажми «Завершить звонок» чтобы выйти"
-    )
-    
-    await safe_edit_text(callback.message, text, reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="❌ Завершить звонок", callback_data="call_end")]
-    ]))
-
-
-@router.callback_query(F.data == "call_end", UserStates.ai_chat)
-async def call_end(callback: CallbackQuery, state: FSMContext):
-    await state.clear()
-    if not await check_access(bot, callback.from_user.id, callback):
-        return
-    await safe_edit_text(callback.message, "📞 Звонок завершён 📞\n\n🦔 *фыр-фыр... пока!*", reply_markup=back_button("menu"))
-
-
-@router.message(UserStates.ai_chat)
-async def ai_chat_message(message: Message, state: FSMContext):
-    """Обработка сообщения в режиме ИИ-чата с ежом. С инструментами и памятью."""
-    user_id = message.from_user.id
-    text = message.text
-    if not text:
-        return
-    
-    # Проверка баланса
-    user = await get_user(user_id)
-    if not user:
-        await state.clear()
-        return
-    
-    if user['balance'] < AI_CHAT_COST:
-        await message.answer(
-            f"❌ Недостаточно Ежидзиков!\n\n💰 Нужно: {AI_CHAT_COST}\n💵 У тебя: {user['balance']}",
-            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="❌ Завершить звонок", callback_data="call_end")]
-            ])
-        )
-        return
-    
-    # Списываем Ежидзики
-    await update_balance(user_id, -AI_CHAT_COST)
-    
-    # Статус «печатает» — отправляем и обновляем в фоне
-    await bot.send_chat_action(chat_id=message.chat.id, action=ChatAction.TYPING)
-    typing_stop = asyncio.Event()
-    
-    async def typing_loop():
-        """Обновляем статус 'печатает' каждые 4 секунды, пока ёж думает."""
-        while not typing_stop.is_set():
-            try:
-                await bot.send_chat_action(chat_id=message.chat.id, action=ChatAction.TYPING)
-            except Exception:
-                pass
-            # Ждём 4 секунды, проверяя флаг остановки каждые 0.5с
-            for _ in range(8):
-                if typing_stop.is_set():
-                    return
-                await asyncio.sleep(0.5)
-    
-    typing_task = asyncio.create_task(typing_loop())
-    
-    # Загружаем историю из FSM
-    data = await state.get_data()
-    ai_history = data.get("ai_history", [])
-    
-    # Формируем сообщения для API
-    api_messages = [{"role": "system", "content": AI_HEDGEHOG_SYSTEM}]
-    
-    # Добавляем историю (последние N пар)
-    for entry in ai_history[-AI_HISTORY_LIMIT:]:
-        api_messages.append({"role": "user", "content": entry["user"]})
-        api_messages.append({"role": "assistant", "content": entry["assistant"]})
-    
-    # Добавляем текущее сообщение
-    api_messages.append({"role": "user", "content": text})
-    
-    # Показываем "Думает..."
-    chat_id = message.chat.id
-    draft_id = random.randint(1, 2**31 - 1)
-    
-    try:
-        # Цикл обработки: вызов API → tool_calls → выполнение → повторный вызов
-        max_iterations = 5
-        final_response = None
-        api_retries = 3  # Количество попыток при ошибке соединения
-        
-        for _ in range(max_iterations):
-            # Попытки вызова API с ретраями при Connection error
-            completion = None
-            last_error = None
-            for attempt in range(api_retries):
-                try:
-                    completion = groq_client.chat.completions.create(
-                        model="openai/gpt-oss-120b",
-                        messages=api_messages,
-                        tools=AI_TOOLS,
-                        temperature=1,
-                        max_completion_tokens=2048,
-                        top_p=1,
-                        reasoning_effort="low",
-                        stream=False
-                    )
-                    break  # Успех — выходим из цикла попыток
-                except Exception as api_err:
-                    last_error = api_err
-                    err_msg = str(api_err).lower()
-                    # Повторяем только при ошибках соединения
-                    if any(kw in err_msg for kw in ['connection', 'timeout', 'timed out', 'network', 'read error', 'reset', '502', '503', '504']):
-                        wait = 1.5 * (attempt + 1)  # 1.5с, 3с, 4.5с
-                        print(f"⚠️ Попытка {attempt+1}/{api_retries} ошибка: {api_err}. Жду {wait}с...")
-                        await asyncio.sleep(wait)
-                        continue
-                    else:
-                        raise  # Другие ошибки — пробрасываем сразу
-            
-            if completion is None:
-                raise last_error  # Все попытки исчерпаны
-            
-            choice = completion.choices[0]
-            msg = choice.message
-            
-            # Если модель хочет вызвать инструменты
-            if msg.tool_calls:
-                # Добавляем сообщение ассистента с tool_calls в историю
-                api_messages.append(msg)
-                
-                # Выполняем каждый инструмент
-                for tool_call in msg.tool_calls:
-                    func_name = tool_call.function.name
-                    func_args = {}
-                    
-                    try:
-                        if tool_call.function.arguments:
-                            func_args = json.loads(tool_call.function.arguments)
-                    except Exception:
-                        pass
-                    
-                    # Показываем промежуточное сообщение «Вызываю инструмент...»
-                    tool_label = TOOL_ACTION_LABELS.get(func_name, func_name)
-                    try:
-                        await bot.send_message(
-                            chat_id=message.chat.id,
-                            text=f"🔧 {tool_label}..."
-                        )
-                    except Exception:
-                        pass
-                    
-                    # Выполняем функцию
-                    tool_func = AI_TOOL_FUNCTIONS.get(func_name)
-                    if tool_func:
-                        try:
-                            result = await tool_func(user_id, **func_args)
-                        except Exception as e:
-                            result = f"Ошибка: {e}"
-                    else:
-                        result = f"Инструмент {func_name} не найден"
-                    
-                    # Добавляем результат инструмента в историю
-                    api_messages.append({
-                        "role": "tool",
-                        "content": str(result),
-                        "tool_call_id": tool_call.id
-                    })
-                
-                # Жёсткое напоминание как user-сообщение (модели лучше слушают user)
-                api_messages.append({
-                    "role": "user",
-                    "content": "ПЕРЕСКАЖИ результат инструмента выше как ёж! Используй ТОЛЬКО информацию из результата. НЕ ПРИДУМЫВАЙ ничего от себя — ни правил, ни квестов, ни таблиц, ни механик которых нет в результате! Если в результате нет подробностей — не добаляй их!"
-                })
-                # Продолжаем цикл — отправляем результаты инструментов обратно
-                continue
-            
-            # Если нет tool_calls — это финальный ответ
-            final_response = msg.content or "Фыр-фыр... *свернулся в клубок* 🦔"
-            break
-        
-        if not final_response:
-            final_response = "Фыр-фыр... *шуршит иголками* 🦔"
-        
-        # Извлекаем <think...</think» блоки и показываем как цитату
-        think_match = re.search(r'<think([\s\S]*?)</think\s*>', final_response)
-        if think_match:
-            think_text = think_match.group(1).strip()
-            final_response = re.sub(r'<think[\s\S]*?</think\s*>', '', final_response).strip()
-            if think_text:
-                # Обрезаем слишком длинный thinking и формируем цитату
-                display_text = think_text[:500] + ("..." if len(think_text) > 500 else "")
-                quote_lines = "\n".join(f"> {line}" for line in display_text.split("\n"))
-                final_response = f"> 💭 Еж думал:\n{quote_lines}\n\n{final_response}"
-        if not final_response:
-            final_response = "Фыр-фыр... 🦔"
-        
-    except Exception as e:
-        print(f"❌ Ошибка Groq API: {e}")
-        # Возвращаем Ежидзики при ошибке — игрок не виноват
-        await update_balance(user_id, AI_CHAT_COST)
-        final_response = "Фыр-фыр... *шуршит иголками* Связь оборвалась! Ежидзики возвращены 💰 Попробуй ещё раз! 📞🦔"
-    
-    # Останавливаем статус «печатает»
-    typing_stop.set()
-    typing_task.cancel()
-    try:
-        await typing_task
-    except asyncio.CancelledError:
-        pass
-    
-    # Сохраняем в историю
-    ai_history.append({"user": text, "assistant": final_response})
-    ai_history = ai_history[-AI_HISTORY_LIMIT:]
-    await state.update_data(ai_history=ai_history)
-    
-    # Стримим ответ ежа
-    full_text = f"🦔 {final_response}\n\n💰 -{AI_CHAT_COST} Ежидзиков"
-    
-    streaming_ok = False
-    try:
-        await bot.send_message_draft(chat_id=chat_id, draft_id=draft_id, text="")
-        await asyncio.sleep(0.3)
-        
-        current = ""
-        chunk_size = 15
-        for i in range(0, len(full_text), chunk_size):
-            current += full_text[i:i + chunk_size]
-            try:
-                await bot.send_message_draft(chat_id=chat_id, draft_id=draft_id, text=current)
-            except Exception:
-                break
-            await asyncio.sleep(0.05)
-        
-        streaming_ok = True
-    except Exception:
-        pass
-    
-    if streaming_ok:
-        await asyncio.sleep(0.4)
-    
-    # Финальное сообщение
-    await message.answer(
-        full_text,
-        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="❌ Завершить звонок", callback_data="call_end")]
-        ])
-    )
-
 # =====================================
 # ♻️ ОБМЕННИК
 # =====================================
@@ -5315,15 +4396,15 @@ async def forge_mine_menu(callback: CallbackQuery):
         async with db.execute("SELECT * FROM mine_state WHERE user_id = ?", (user_id,)) as cursor:
             mine = await cursor.fetchone()
 
-    if mine and mine['mining_until']:
-        mining_until = datetime.strptime(mine['mining_until'], "%Y-%m-%d %H:%M:%S")
-        if now < mining_until:
+    if mine and mine['m1ning_until']:
+        m1ning_until = datetime.strptime(mine['m1ning_until'], "%Y-%m-%d %H:%M:%S")
+        if now < m1ning_until:
             # Ещё копает
-            remaining = int((mining_until - now).total_seconds())
+            remaining = int((m1ning_until - now).total_seconds())
             item = await get_forge_item_by_id(mine['current_item_id'])
             item_name = item['name'] if item else "???"
             text = f"⛏️ **Шахта**\n\n⏳ Копаю: **{item_name}**\nОсталось: {remaining} сек."
-            await safe_edit_text(callback.message, text, reply_markup=forge_mine_keyboard(mining=True), parse_mode="Markdown")
+            await safe_edit_text(callback.message, text, reply_markup=forge_mine_keyboard(m1ning=True), parse_mode="Markdown")
             return
 
     if mine and mine['cooldown_until']:
@@ -5352,9 +4433,9 @@ async def mine_start(callback: CallbackQuery):
 
     now = datetime.now()
     if mine:
-        if mine['mining_until']:
-            mining_until = datetime.strptime(mine['mining_until'], "%Y-%m-%d %H:%M:%S")
-            if now < mining_until:
+        if mine['m1ning_until']:
+            m1ning_until = datetime.strptime(mine['m1ning_until'], "%Y-%m-%d %H:%M:%S")
+            if now < m1ning_until:
                 await callback.answer("⏳ Ты уже копаешь!", show_alert=True)
                 return
         if mine['cooldown_until']:
@@ -5386,19 +4467,19 @@ async def mine_start(callback: CallbackQuery):
             break
 
     mine_time = chosen['mine_time'] if chosen['mine_time'] > 0 else 5
-    mining_until = now + timedelta(seconds=mine_time)
+    m1ning_until = now + timedelta(seconds=mine_time)
 
     async with aiosqlite.connect(DB_NAME) as db:
         await db.execute('''
-            INSERT INTO mine_state (user_id, mining_until, cooldown_until, current_item_id)
+            INSERT INTO mine_state (user_id, m1ning_until, cooldown_until, current_item_id)
             VALUES (?, ?, NULL, ?)
-            ON CONFLICT(user_id) DO UPDATE SET mining_until = ?, cooldown_until = NULL, current_item_id = ?
-        ''', (user_id, mining_until.strftime("%Y-%m-%d %H:%M:%S"), chosen['id'],
-              mining_until.strftime("%Y-%m-%d %H:%M:%S"), chosen['id']))
+            ON CONFLICT(user_id) DO UPDATE SET m1ning_until = ?, cooldown_until = NULL, current_item_id = ?
+        ''', (user_id, m1ning_until.strftime("%Y-%m-%d %H:%M:%S"), chosen['id'],
+              m1ning_until.strftime("%Y-%m-%d %H:%M:%S"), chosen['id']))
         await db.commit()
 
     text = f"⛏️ **Шахта**\n\n⏳ Копаю: **{chosen['name']}**\nВремя добычи: {mine_time} сек."
-    await safe_edit_text(callback.message, text, reply_markup=forge_mine_keyboard(mining=True), parse_mode="Markdown")
+    await safe_edit_text(callback.message, text, reply_markup=forge_mine_keyboard(m1ning=True), parse_mode="Markdown")
 
 
 @router.callback_query(F.data == "forge_mine_check")
@@ -5412,13 +4493,13 @@ async def forge_mine_check(callback: CallbackQuery):
         async with db.execute("SELECT * FROM mine_state WHERE user_id = ?", (user_id,)) as cursor:
             mine = await cursor.fetchone()
 
-    if not mine or not mine['mining_until']:
+    if not mine or not mine['m1ning_until']:
         await forge_mine_menu(callback)
         return
 
-    mining_until = datetime.strptime(mine['mining_until'], "%Y-%m-%d %H:%M:%S")
+    m1ning_until = datetime.strptime(mine['m1ning_until'], "%Y-%m-%d %H:%M:%S")
 
-    if now >= mining_until:
+    if now >= m1ning_until:
         # Накопали! Выдаём предмет
         item = await get_forge_item_by_id(mine['current_item_id'])
         if item:
@@ -5431,7 +4512,7 @@ async def forge_mine_check(callback: CallbackQuery):
 
         async with aiosqlite.connect(DB_NAME) as db:
             await db.execute('''
-                UPDATE mine_state SET mining_until = NULL, cooldown_until = ?, current_item_id = NULL
+                UPDATE mine_state SET m1ning_until = NULL, cooldown_until = ?, current_item_id = NULL
                 WHERE user_id = ?
             ''', (cooldown_until.strftime("%Y-%m-%d %H:%M:%S"), user_id))
             await db.commit()
@@ -5442,11 +4523,11 @@ async def forge_mine_check(callback: CallbackQuery):
                 f"😴 Передышка: {cooldown} сек.")
         await safe_edit_text(callback.message, text, reply_markup=forge_mine_keyboard(cooldown=True), parse_mode="Markdown")
     else:
-        remaining = int((mining_until - now).total_seconds())
+        remaining = int((m1ning_until - now).total_seconds())
         item = await get_forge_item_by_id(mine['current_item_id'])
         item_name = item['name'] if item else "???"
         text = f"⛏️ **Шахта**\n\n⏳ Копаю: **{item_name}**\nОсталось: {remaining} сек."
-        await safe_edit_text(callback.message, text, reply_markup=forge_mine_keyboard(mining=True), parse_mode="Markdown")
+        await safe_edit_text(callback.message, text, reply_markup=forge_mine_keyboard(m1ning=True), parse_mode="Markdown")
 
 
 # --- АУКЦИОН ---
@@ -5911,32 +4992,32 @@ async def forge_inventory_item(callback: CallbackQuery):
 
 
 # =====================================
-# 💻 МИайнБибик
+# 💻 МαйHинг
 # =====================================
 
 # --- Вспомогательные функции ---
 
-async def get_mining_state(user_id: int) -> dict:
-    """Получает или создаёт состояние миайнбибика игрока."""
+async def get_m1ning_state(user_id: int) -> dict:
+    """Получает или создаёт состояние мαйHинга игрока."""
     async with aiosqlite.connect(DB_NAME) as db:
         db.row_factory = aiosqlite.Row
-        async with db.execute("SELECT * FROM mining_state WHERE user_id = ?", (user_id,)) as cursor:
+        async with db.execute("SELECT * FROM m1ning_state WHERE user_id = ?", (user_id,)) as cursor:
             row = await cursor.fetchone()
         if not row:
-            await db.execute("INSERT OR IGNORE INTO mining_state (user_id) VALUES (?)", (user_id,))
+            await db.execute("INSERT OR IGNORE INTO m1ning_state (user_id) VALUES (?)", (user_id,))
             await db.commit()
-            async with db.execute("SELECT * FROM mining_state WHERE user_id = ?", (user_id,)) as cursor:
+            async with db.execute("SELECT * FROM m1ning_state WHERE user_id = ?", (user_id,)) as cursor:
                 row = await cursor.fetchone()
-    return dict(row) if row else {"user_id": user_id, "ezhcoins": 0, "is_mining": 0, "total_mined": 0, "last_mine": None}
+    return dict(row) if row else {"user_id": user_id, "b1tcoins": 0, "is_m1ning": 0, "total_m1ned": 0, "last_mine": None}
 
 
-async def get_mining_inventory(user_id: int) -> dict:
-    """Возвращает dict {component_id: {quantity, is_broken}} инвентаря миайнбибика."""
+async def get_m1ning_inventory(user_id: int) -> dict:
+    """Возвращает dict {component_id: {quantity, is_broken}} инвентаря мαйHинга."""
     async with aiosqlite.connect(DB_NAME) as db:
         db.row_factory = aiosqlite.Row
         async with db.execute(
-            "SELECT mi.*, mc.name, mc.comp_type FROM mining_inventory mi "
-            "JOIN mining_components mc ON mi.component_id = mc.id "
+            "SELECT mi.*, mc.name, mc.comp_type FROM m1ning_inventory mi "
+            "JOIN m1ning_components mc ON mi.component_id = mc.id "
             "WHERE mi.user_id = ? AND mi.quantity > 0",
             (user_id,)
         ) as cursor:
@@ -5948,38 +5029,38 @@ async def get_mining_inventory(user_id: int) -> dict:
 
 
 async def get_user_rigs(user_id: int) -> list:
-    """Получает все риги игрока."""
+    """Получает все с6opки игрока."""
     async with aiosqlite.connect(DB_NAME) as db:
         db.row_factory = aiosqlite.Row
-        async with db.execute("SELECT * FROM mining_rigs WHERE user_id = ?", (user_id,)) as cursor:
+        async with db.execute("SELECT * FROM m1ning_rigs WHERE user_id = ?", (user_id,)) as cursor:
             return [dict(row) for row in await cursor.fetchall()]
 
 
 async def calc_rig_stats(rig: dict) -> dict:
-    """Рассчитывает хешрейт, потребление и защиту рига."""
+    """Рассчитывает хешрейт, потребление и защиту с6opка."""
     async with aiosqlite.connect(DB_NAME) as db:
         db.row_factory = aiosqlite.Row
-        stats = {"mh": 0, "power": 0, "break_reduction": 0, "gpu_name": "?", "psu_name": "?", "mobo_name": "?"}
+        stats = {"mh": 0, "power": 0, "break_reduction": 0, "v1deo_name": "?", "psu_name": "?", "mobo_name": "?"}
         
-        async with db.execute("SELECT * FROM mining_components WHERE id = ?", (rig['gpu_id'],)) as cursor:
-            gpu = await cursor.fetchone()
-        if gpu:
-            stats['mh'] += gpu['mh_rate']
-            stats['power'] += gpu['power_w']
-            stats['gpu_name'] = gpu['name']
+        async with db.execute("SELECT * FROM m1ning_components WHERE id = ?", (rig['v1deo_id'],)) as cursor:
+            v1deo = await cursor.fetchone()
+        if v1deo:
+            stats['mh'] += v1deo['mh_rate']
+            stats['power'] += v1deo['power_w']
+            stats['v1deo_name'] = v1deo['name']
 
-        async with db.execute("SELECT * FROM mining_components WHERE id = ?", (rig['psu_id'],)) as cursor:
+        async with db.execute("SELECT * FROM m1ning_components WHERE id = ?", (rig['psu_id'],)) as cursor:
             psu = await cursor.fetchone()
         if psu:
             stats['psu_name'] = psu['name']
 
-        async with db.execute("SELECT * FROM mining_components WHERE id = ?", (rig['mobo_id'],)) as cursor:
+        async with db.execute("SELECT * FROM m1ning_components WHERE id = ?", (rig['mobo_id'],)) as cursor:
             mobo = await cursor.fetchone()
         if mobo:
             stats['mobo_name'] = mobo['name']
 
         if rig.get('cooling_id'):
-            async with db.execute("SELECT * FROM mining_components WHERE id = ?", (rig['cooling_id'],)) as cursor:
+            async with db.execute("SELECT * FROM m1ning_components WHERE id = ?", (rig['cooling_id'],)) as cursor:
                 cool = await cursor.fetchone()
             if cool:
                 stats['break_reduction'] = cool['break_reduction']
@@ -5992,52 +5073,52 @@ async def calc_rig_stats(rig: dict) -> dict:
     return stats
 
 
-async def get_ezhcoin_rate() -> float:
-    """Рассчитывает текущий курс Ежкоина в Ежидзиках."""
-    base_rate = float(await get_setting("mining_base_coin_rate", "0.5"))
+async def get_b1tcoin_rate() -> float:
+    """Рассчитывает текущий курс бNтk0ина в Ежидзиках."""
+    base_rate = float(await get_setting("m1ning_base_coin_rate", "0.5"))
     async with aiosqlite.connect(DB_NAME) as db:
-        async with db.execute("SELECT COALESCE(SUM(total_mined), 0) FROM mining_state") as cursor:
-            total_mined = (await cursor.fetchone())[0]
-    # Курс падает по мере накопления Ежкоинов в экономике
-    rate = base_rate * 45 / (1 + total_mined / 10000)
+        async with db.execute("SELECT COALESCE(SUM(total_m1ned), 0) FROM m1ning_state") as cursor:
+            total_m1ned = (await cursor.fetchone())[0]
+    # Курс падает по мере накопления бNтk0инов в экономике
+    rate = base_rate * 45 / (1 + total_m1ned / 10000)
     return max(rate, 0.1)  # Минимальный курс
 
 
-async def ensure_mining_state(user_id: int):
-    """Создаёт запись mining_state если её нет."""
+async def ensure_m1ning_state(user_id: int):
+    """Создаёт запись m1ning_state если её нет."""
     async with aiosqlite.connect(DB_NAME) as db:
-        await db.execute("INSERT OR IGNORE INTO mining_state (user_id) VALUES (?)", (user_id,))
+        await db.execute("INSERT OR IGNORE INTO m1ning_state (user_id) VALUES (?)", (user_id,))
         await db.commit()
 
 
-# --- ГЛАВНОЕ МЕНЮ МИайнБибикА ---
-@router.callback_query(F.data == "mining")
-async def mining_menu(callback: CallbackQuery, state: FSMContext):
+# --- ГЛАВНОЕ МЕНЮ МαйHингА ---
+@router.callback_query(F.data == "m1ning")
+async def m1ning_menu(callback: CallbackQuery, state: FSMContext):
     await state.clear()
     if not await check_access(bot, callback.from_user.id, callback):
         return
-    await ensure_mining_state(callback.from_user.id)
-    ms = await get_mining_state(callback.from_user.id)
+    await ensure_m1ning_state(callback.from_user.id)
+    ms = await get_m1ning_state(callback.from_user.id)
     rigs = await get_user_rigs(callback.from_user.id)
-    rate = await get_ezhcoin_rate()
+    rate = await get_b1tcoin_rate()
     
     text = (
-        "💻 **МиайнБибик**\n\n"
-        f"💰 Ежкоины: **{ms['ezhcoins']:.2f}**\n"
-        f"📊 Курс: 1 Ежкоин = {rate:.2f} Ежидзиков\n"
-        f"🔧 Ригов: {len(rigs)}\n"
-        f"{'🟢 МиайнБибик активен' if ms['is_mining'] else '🔴 МиайнБибик остановлен'}\n\n"
+        "💻 **мαйHинг**\n\n"
+        f"💰 бNтk0ины: **{ms['b1tcoins']:.2f}**\n"
+        f"📊 Курс: 1 бNтk0ин = {rate:.2f} Ежидзиков\n"
+        f"🔧 С6opок: {len(rigs)}\n"
+        f"{'🟢 мαйHинг активен' if ms['is_m1ning'] else '🔴 мαйHинг остановлен'}\n\n"
         "Выбери раздел:"
     )
-    await safe_edit_text(callback.message, text, reply_markup=mining_keyboard(), parse_mode="Markdown")
+    await safe_edit_text(callback.message, text, reply_markup=m1ning_keyboard(), parse_mode="Markdown")
 
 
 # --- РЫНОК КОМПЛЕКТУЮЩИХ ---
-@router.callback_query(F.data == "mining_market")
-async def mining_market_menu(callback: CallbackQuery):
+@router.callback_query(F.data == "m1ning_market")
+async def m1ning_market_menu(callback: CallbackQuery):
     async with aiosqlite.connect(DB_NAME) as db:
         db.row_factory = aiosqlite.Row
-        async with db.execute("SELECT * FROM mining_components ORDER BY comp_type, price") as cursor:
+        async with db.execute("SELECT * FROM m1ning_components ORDER BY comp_type, price") as cursor:
             components = await cursor.fetchall()
 
     if not components:
@@ -6046,7 +5127,7 @@ async def mining_market_menu(callback: CallbackQuery):
 
     text = "🛒 **Рынок комплектующих**\n\n"
     buttons = []
-    type_labels = {"gpu": "🖥 Видеокарты", "psu": "🔌 Блоки питания", "mobo": "🔲 Мат. платы", "cooling": "❄️ Охлаждение"}
+    type_labels = {"v1deo": "🖥 Видеокарты", "psu": "🔌 Блоки питания", "mobo": "🔲 Мат. платы", "cooling": "❄️ Охлаждение"}
     current_type = None
     
     for comp in components:
@@ -6061,8 +5142,8 @@ async def mining_market_menu(callback: CallbackQuery):
             info += f" | {comp['mh_rate']} MH/s"
         if comp['power_w'] > 0:
             info += f" | {comp['power_w']}W"
-        if comp['gpu_slots'] > 0:
-            info += f" | до {comp['gpu_slots']} карт"
+        if comp['v1deo_slots'] > 0:
+            info += f" | до {comp['v1deo_slots']} карт"
         if comp['break_reduction'] > 0:
             info += f" | -{int(comp['break_reduction']*100)}% поломка"
         text += info + "\n"
@@ -6072,19 +5153,19 @@ async def mining_market_menu(callback: CallbackQuery):
             callback_data=f"mbuy_{comp['id']}"
         )])
 
-    buttons.append([InlineKeyboardButton(text="Назад ◀️◀️◀️", callback_data="mining")])
+    buttons.append([InlineKeyboardButton(text="Назад ◀️◀️◀️", callback_data="m1ning")])
     await safe_edit_text(callback.message, text, reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons), parse_mode="Markdown")
 
 
 @router.callback_query(F.data.startswith("mbuy_"))
-async def mining_buy_component(callback: CallbackQuery):
+async def m1ning_buy_component(callback: CallbackQuery):
     """Покупка комплектующего."""
     comp_id = int(callback.data.replace("mbuy_", ""))
     user_id = callback.from_user.id
 
     async with aiosqlite.connect(DB_NAME) as db:
         db.row_factory = aiosqlite.Row
-        async with db.execute("SELECT * FROM mining_components WHERE id = ?", (comp_id,)) as cursor:
+        async with db.execute("SELECT * FROM m1ning_components WHERE id = ?", (comp_id,)) as cursor:
             comp = await cursor.fetchone()
         if not comp:
             await callback.answer("❌ Товар не найден!", show_alert=True)
@@ -6129,7 +5210,7 @@ async def mining_buy_component(callback: CallbackQuery):
 
         # Добавляем в инвентарь
         await db.execute('''
-            INSERT INTO mining_inventory (user_id, component_id, quantity, is_broken)
+            INSERT INTO m1ning_inventory (user_id, component_id, quantity, is_broken)
             VALUES (?, ?, 1, 0)
             ON CONFLICT(user_id, component_id) DO UPDATE SET quantity = quantity + 1
         ''', (user_id, comp_id))
@@ -6137,19 +5218,19 @@ async def mining_buy_component(callback: CallbackQuery):
 
     curr_name = CURRENCY_LABELS.get(currency, currency)
     await callback.answer(f"✅ Куплено: {comp['name']} за {price} {curr_name}!", show_alert=True)
-    await mining_market_menu(callback)
+    await m1ning_market_menu(callback)
 
 
 # --- МОЙ РИГ ---
-@router.callback_query(F.data == "mining_rig")
-async def mining_rig_menu(callback: CallbackQuery, state: FSMContext):
+@router.callback_query(F.data == "m1ning_rig")
+async def m1ning_rig_menu(callback: CallbackQuery, state: FSMContext):
     await state.clear()
     user_id = callback.from_user.id
-    inv = await get_mining_inventory(user_id)
+    inv = await get_m1ning_inventory(user_id)
     rigs = await get_user_rigs(user_id)
-    max_rigs = int(await get_setting("mining_max_rigs", "5"))
+    max_rigs = int(await get_setting("m1ning_max_rigs", "5"))
 
-    text = "🔧 **Мои риги**\n\n"
+    text = "🔧 **Мои с6opки**\n\n"
     buttons = []
 
     if rigs:
@@ -6159,43 +5240,43 @@ async def mining_rig_menu(callback: CallbackQuery, state: FSMContext):
             cool_text = f"\n   ❄️ {stats.get('cooling_name', 'нет')}" if stats.get('cooling_name') else ""
             text += (
                 f"{status} **Риг #{i+1}**\n"
-                f"   🖥 {stats['gpu_name']} ({stats['mh']} MH/s)\n"
+                f"   🖥 {stats['v1deo_name']} ({stats['mh']} MH/s)\n"
                 f"   🔌 {stats['psu_name']}\n"
                 f"   🔲 {stats['mobo_name']}{cool_text}\n\n"
             )
             buttons.append([InlineKeyboardButton(
-                text=f"{'🟢' if rig['is_active'] else '🔴'} Риг #{i+1} — {stats['gpu_name']}",
+                text=f"{'🟢' if rig['is_active'] else '🔴'} Риг #{i+1} — {stats['v1deo_name']}",
                 callback_data=f"mrig_{rig['id']}"
             )])
     else:
-        text += "📭 У тебя нет ригов!\n\n"
+        text += "📭 У тебя нет с6opков!\n\n"
 
     # Кнопка сборки если есть компоненты и не достигнут лимит
-    has_gpu = any(v['comp_type'] == 'gpu' and v['quantity'] > v.get('is_broken', 0) for v in inv.values())
+    has_v1deo = any(v['comp_type'] == 'v1deo' and v['quantity'] > v.get('is_broken', 0) for v in inv.values())
     has_psu = any(v['comp_type'] == 'psu' and v['quantity'] > v.get('is_broken', 0) for v in inv.values())
     has_mobo = any(v['comp_type'] == 'mobo' and v['quantity'] > v.get('is_broken', 0) for v in inv.values())
 
-    if has_gpu and has_psu and has_mobo and len(rigs) < max_rigs:
-        buttons.append([InlineKeyboardButton(text="➕ Собрать риг", callback_data="mrig_build", style=ButtonStyle.SUCCESS)])
+    if has_v1deo and has_psu and has_mobo and len(rigs) < max_rigs:
+        buttons.append([InlineKeyboardButton(text="➕ Собрать с6opк", callback_data="mrig_build", style=ButtonStyle.SUCCESS)])
     elif len(rigs) >= max_rigs:
-        text += f"⚠️ Максимум ригов: {max_rigs}\n"
+        text += f"⚠️ Максимум с6opков: {max_rigs}\n"
 
-    buttons.append([InlineKeyboardButton(text="📦 Мои комплектующие", callback_data="mining_parts")])
-    buttons.append([InlineKeyboardButton(text="Назад ◀️◀️◀️", callback_data="mining")])
+    buttons.append([InlineKeyboardButton(text="📦 Мои комплектующие", callback_data="m1ning_parts")])
+    buttons.append([InlineKeyboardButton(text="Назад ◀️◀️◀️", callback_data="m1ning")])
     await safe_edit_text(callback.message, text, reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons), parse_mode="Markdown")
 
 
-@router.callback_query(F.data == "mining_parts")
-async def mining_parts_list(callback: CallbackQuery):
+@router.callback_query(F.data == "m1ning_parts")
+async def m1ning_parts_list(callback: CallbackQuery):
     """Показать все комплектующие игрока."""
     user_id = callback.from_user.id
-    inv = await get_mining_inventory(user_id)
+    inv = await get_m1ning_inventory(user_id)
 
     if not inv:
         await callback.answer("📦 У тебя нет комплектующих!", show_alert=True)
         return
 
-    type_labels = {"gpu": "🖥 Видеокарты", "psu": "🔌 Блоки питания", "mobo": "🔲 Мат. платы", "cooling": "❄️ Охлаждение"}
+    type_labels = {"v1deo": "🖥 Видеокарты", "psu": "🔌 Блоки питания", "mobo": "🔲 Мат. платы", "cooling": "❄️ Охлаждение"}
     text = "📦 **Мои комплектующие**\n\n"
     buttons = []
     by_type = {}
@@ -6215,7 +5296,7 @@ async def mining_parts_list(callback: CallbackQuery):
                 # Кнопка починки
                 async with aiosqlite.connect(DB_NAME) as db:
                     db.row_factory = aiosqlite.Row
-                    async with db.execute("SELECT price FROM mining_components WHERE id = ?", (item['component_id'],)) as cursor:
+                    async with db.execute("SELECT price FROM m1ning_components WHERE id = ?", (item['component_id'],)) as cursor:
                         comp = await cursor.fetchone()
                 if comp:
                     repair_cost = comp['price'] // 3
@@ -6224,26 +5305,26 @@ async def mining_parts_list(callback: CallbackQuery):
                         callback_data=f"mrepair_{item['component_id']}"
                     )])
 
-    buttons.append([InlineKeyboardButton(text="Назад ◀️◀️◀️", callback_data="mining_rig")])
+    buttons.append([InlineKeyboardButton(text="Назад ◀️◀️◀️", callback_data="m1ning_rig")])
     await safe_edit_text(callback.message, text, reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons), parse_mode="Markdown")
 
 
 @router.callback_query(F.data.startswith("mrepair_"))
-async def mining_repair(callback: CallbackQuery):
+async def m1ning_repair(callback: CallbackQuery):
     """Починка сломанного компонента."""
     comp_id = int(callback.data.replace("mrepair_", ""))
     user_id = callback.from_user.id
 
     async with aiosqlite.connect(DB_NAME) as db:
         db.row_factory = aiosqlite.Row
-        async with db.execute("SELECT * FROM mining_components WHERE id = ?", (comp_id,)) as cursor:
+        async with db.execute("SELECT * FROM m1ning_components WHERE id = ?", (comp_id,)) as cursor:
             comp = await cursor.fetchone()
         if not comp:
             await callback.answer("❌ Компонент не найден!", show_alert=True)
             return
 
         async with db.execute(
-            "SELECT * FROM mining_inventory WHERE user_id = ? AND component_id = ? AND is_broken > 0",
+            "SELECT * FROM m1ning_inventory WHERE user_id = ? AND component_id = ? AND is_broken > 0",
             (user_id, comp_id)
         ) as cursor:
             inv = await cursor.fetchone()
@@ -6257,22 +5338,22 @@ async def mining_repair(callback: CallbackQuery):
             await callback.answer(f"❌ Нужно {repair_cost} Ежидзиков на починку!", show_alert=True)
             return
 
-        await db.execute("UPDATE mining_inventory SET is_broken = is_broken - 1 WHERE user_id = ? AND component_id = ?", (user_id, comp_id))
+        await db.execute("UPDATE m1ning_inventory SET is_broken = is_broken - 1 WHERE user_id = ? AND component_id = ?", (user_id, comp_id))
         await db.commit()
 
     await callback.answer(f"✅ Починено: {comp['name']} за {repair_cost} Ежидзиков!", show_alert=True)
-    await mining_parts_list(callback)
+    await m1ning_parts_list(callback)
 
 
 @router.callback_query(lambda c: c.data and c.data.startswith("mrig_") and not c.data.startswith("mrig_build") and c.data[5:].isdigit())
-async def mining_rig_detail(callback: CallbackQuery):
-    """Детали рига — включить/выключить, удалить."""
-    rig_id = int(callback.data.replace("mrig_", ""))
+async def m1ning_rig_detail(callback: CallbackQuery):
+    """Детали с6opка — включить/выключить, удалить."""
+    s6orka_id = int(callback.data.replace("mrig_", ""))
     user_id = callback.from_user.id
 
     async with aiosqlite.connect(DB_NAME) as db:
         db.row_factory = aiosqlite.Row
-        async with db.execute("SELECT * FROM mining_rigs WHERE id = ? AND user_id = ?", (rig_id, user_id)) as cursor:
+        async with db.execute("SELECT * FROM m1ning_rigs WHERE id = ? AND user_id = ?", (s6orka_id, user_id)) as cursor:
             rig = await cursor.fetchone()
         if not rig:
             await callback.answer("❌ Риг не найден!", show_alert=True)
@@ -6282,13 +5363,13 @@ async def mining_rig_detail(callback: CallbackQuery):
     stats = await calc_rig_stats(rig_dict)
     status = "🟢 Активен" if rig['is_active'] else "🔴 Остановлен"
     
-    elec_rate = float(await get_setting("mining_electricity_rate", "1"))
+    elec_rate = float(await get_setting("m1ning_electricity_rate", "1"))
     elec_cost = (stats['power'] / 10) * elec_rate
 
     text = (
-        f"🔧 **Риг #{rig_id}**\n\n"
+        f"🔧 **Риг #{s6orka_id}**\n\n"
         f"Статус: {status}\n"
-        f"🖥 Видеокарта: {stats['gpu_name']}\n"
+        f"🖥 Видеокарта: {stats['v1deo_name']}\n"
         f"🔌 Блок питания: {stats['psu_name']}\n"
         f"🔲 Мат. плата: {stats['mobo_name']}\n"
     )
@@ -6302,165 +5383,165 @@ async def mining_rig_detail(callback: CallbackQuery):
 
     buttons = []
     if rig['is_active']:
-        buttons.append([InlineKeyboardButton(text="⏹ Остановить", callback_data=f"mrigstop_{rig_id}", style=ButtonStyle.DANGER)])
+        buttons.append([InlineKeyboardButton(text="⏹ Остановить", callback_data=f"mrigstop_{s6orka_id}", style=ButtonStyle.DANGER)])
     else:
-        buttons.append([InlineKeyboardButton(text="▶️ Запустить", callback_data=f"mrigstart_{rig_id}", style=ButtonStyle.SUCCESS)])
-    buttons.append([InlineKeyboardButton(text="🗑 Разобрать риг", callback_data=f"mrigdel_{rig_id}", style=ButtonStyle.DANGER)])
-    buttons.append([InlineKeyboardButton(text="Назад ◀️◀️◀️", callback_data="mining_rig")])
+        buttons.append([InlineKeyboardButton(text="▶️ Запустить", callback_data=f"mrigstart_{s6orka_id}", style=ButtonStyle.SUCCESS)])
+    buttons.append([InlineKeyboardButton(text="🗑 Разобрать с6opк", callback_data=f"mrigdel_{s6orka_id}", style=ButtonStyle.DANGER)])
+    buttons.append([InlineKeyboardButton(text="Назад ◀️◀️◀️", callback_data="m1ning_rig")])
     await safe_edit_text(callback.message, text, reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons), parse_mode="Markdown")
 
 
 @router.callback_query(F.data.startswith("mrigstart_"))
-async def mining_rig_start(callback: CallbackQuery):
-    rig_id = int(callback.data.replace("mrigstart_", ""))
+async def m1ning_rig_start(callback: CallbackQuery):
+    s6orka_id = int(callback.data.replace("mrigstart_", ""))
     user_id = callback.from_user.id
     async with aiosqlite.connect(DB_NAME) as db:
-        await db.execute("UPDATE mining_rigs SET is_active = 1 WHERE id = ? AND user_id = ?", (rig_id, user_id))
+        await db.execute("UPDATE m1ning_rigs SET is_active = 1 WHERE id = ? AND user_id = ?", (s6orka_id, user_id))
         await db.commit()
     await callback.answer("▶️ Риг запущен!", show_alert=True)
-    await mining_rig_detail(callback)
+    await m1ning_rig_detail(callback)
 
 
 @router.callback_query(F.data.startswith("mrigstop_"))
-async def mining_rig_stop(callback: CallbackQuery):
-    rig_id = int(callback.data.replace("mrigstop_", ""))
+async def m1ning_rig_stop(callback: CallbackQuery):
+    s6orka_id = int(callback.data.replace("mrigstop_", ""))
     user_id = callback.from_user.id
     async with aiosqlite.connect(DB_NAME) as db:
-        await db.execute("UPDATE mining_rigs SET is_active = 0 WHERE id = ? AND user_id = ?", (rig_id, user_id))
+        await db.execute("UPDATE m1ning_rigs SET is_active = 0 WHERE id = ? AND user_id = ?", (s6orka_id, user_id))
         await db.commit()
     await callback.answer("⏹ Риг остановлен!", show_alert=True)
-    await mining_rig_detail(callback)
+    await m1ning_rig_detail(callback)
 
 
 @router.callback_query(F.data.startswith("mrigdel_"))
-async def mining_rig_delete(callback: CallbackQuery):
-    """Разобрать риг — компоненты возвращаются в инвентарь."""
-    rig_id = int(callback.data.replace("mrigdel_", ""))
+async def m1ning_rig_delete(callback: CallbackQuery):
+    """Разобрать с6opк — компоненты возвращаются в инвентарь."""
+    s6orka_id = int(callback.data.replace("mrigdel_", ""))
     user_id = callback.from_user.id
 
     async with aiosqlite.connect(DB_NAME) as db:
         db.row_factory = aiosqlite.Row
-        async with db.execute("SELECT * FROM mining_rigs WHERE id = ? AND user_id = ?", (rig_id, user_id)) as cursor:
+        async with db.execute("SELECT * FROM m1ning_rigs WHERE id = ? AND user_id = ?", (s6orka_id, user_id)) as cursor:
             rig = await cursor.fetchone()
         if not rig:
             await callback.answer("❌ Риг не найден!", show_alert=True)
             return
 
         # Возвращаем компоненты в инвентарь
-        for comp_id in [rig['gpu_id'], rig['psu_id'], rig['mobo_id']]:
+        for comp_id in [rig['v1deo_id'], rig['psu_id'], rig['mobo_id']]:
             if comp_id:
                 await db.execute('''
-                    INSERT INTO mining_inventory (user_id, component_id, quantity, is_broken)
+                    INSERT INTO m1ning_inventory (user_id, component_id, quantity, is_broken)
                     VALUES (?, ?, 1, 0)
                     ON CONFLICT(user_id, component_id) DO UPDATE SET quantity = quantity + 1
                 ''', (user_id, comp_id))
         if rig['cooling_id']:
             await db.execute('''
-                INSERT INTO mining_inventory (user_id, component_id, quantity, is_broken)
+                INSERT INTO m1ning_inventory (user_id, component_id, quantity, is_broken)
                 VALUES (?, ?, 1, 0)
                 ON CONFLICT(user_id, component_id) DO UPDATE SET quantity = quantity + 1
             ''', (user_id, rig['cooling_id']))
 
-        await db.execute("DELETE FROM mining_rigs WHERE id = ?", (rig_id,))
+        await db.execute("DELETE FROM m1ning_rigs WHERE id = ?", (s6orka_id,))
         await db.commit()
 
     await callback.answer("🗑 Риг разобран, компоненты возвращены!", show_alert=True)
-    await mining_rig_menu(callback, None)
+    await m1ning_rig_menu(callback, None)
 
 
 @router.callback_query(F.data == "mrig_build")
-async def mining_rig_build_start(callback: CallbackQuery, state: FSMContext):
-    """Начало сборки рига — выбор видеокарты."""
+async def m1ning_rig_build_start(callback: CallbackQuery, state: FSMContext):
+    """Начало сборки с6opка — выбор видеокарты."""
     user_id = callback.from_user.id
-    inv = await get_mining_inventory(user_id)
+    inv = await get_m1ning_inventory(user_id)
 
-    gpus = [(k, v) for k, v in inv.items() if v['comp_type'] == 'gpu' and v['quantity'] > v.get('is_broken', 0)]
-    if not gpus:
+    v1deos = [(k, v) for k, v in inv.items() if v['comp_type'] == 'v1deo' and v['quantity'] > v.get('is_broken', 0)]
+    if not v1deos:
         await callback.answer("❌ Нет видеокарт! Купи на рынке.", show_alert=True)
         return
 
-    text = "🖥 **Сборка рига — Шаг 1/4**\n\nВыбери видеокарту:"
+    text = "🖥 **Сборка с6opка — Шаг 1/4**\n\nВыбери видеокарту:"
     buttons = []
-    for comp_id, item in gpus:
+    for comp_id, item in v1deos:
         async with aiosqlite.connect(DB_NAME) as db:
             db.row_factory = aiosqlite.Row
-            async with db.execute("SELECT mh_rate FROM mining_components WHERE id = ?", (comp_id,)) as cursor:
+            async with db.execute("SELECT mh_rate FROM m1ning_components WHERE id = ?", (comp_id,)) as cursor:
                 comp = await cursor.fetchone()
         mh = comp['mh_rate'] if comp else 0
         buttons.append([InlineKeyboardButton(
             text=f"🖥 {item['name']} ({mh} MH/s)",
-            callback_data=f"mbuild_gpu_{comp_id}"
+            callback_data=f"mbuild_v1deo_{comp_id}"
         )])
-    buttons.append([InlineKeyboardButton(text="❌ Отмена", callback_data="mining_rig")])
+    buttons.append([InlineKeyboardButton(text="❌ Отмена", callback_data="m1ning_rig")])
     await safe_edit_text(callback.message, text, reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons), parse_mode="Markdown")
 
 
-@router.callback_query(F.data.startswith("mbuild_gpu_"))
-async def mining_rig_build_psu(callback: CallbackQuery, state: FSMContext):
-    gpu_id = int(callback.data.replace("mbuild_gpu_", ""))
-    await state.update_data(build_gpu=gpu_id)
+@router.callback_query(F.data.startswith("mbuild_v1deo_"))
+async def m1ning_rig_build_psu(callback: CallbackQuery, state: FSMContext):
+    v1deo_id = int(callback.data.replace("mbuild_v1deo_", ""))
+    await state.update_data(build_v1deo=v1deo_id)
     
     user_id = callback.from_user.id
-    inv = await get_mining_inventory(user_id)
+    inv = await get_m1ning_inventory(user_id)
     psus = [(k, v) for k, v in inv.items() if v['comp_type'] == 'psu' and v['quantity'] > v.get('is_broken', 0)]
     if not psus:
         await callback.answer("❌ Нет блоков питания! Купи на рынке.", show_alert=True)
         return
 
-    text = "🔌 **Сборка рига — Шаг 2/4**\n\nВыбери блок питания:"
+    text = "🔌 **Сборка с6opка — Шаг 2/4**\n\nВыбери блок питания:"
     buttons = []
     for comp_id, item in psus:
         async with aiosqlite.connect(DB_NAME) as db:
             db.row_factory = aiosqlite.Row
-            async with db.execute("SELECT gpu_slots FROM mining_components WHERE id = ?", (comp_id,)) as cursor:
+            async with db.execute("SELECT v1deo_slots FROM m1ning_components WHERE id = ?", (comp_id,)) as cursor:
                 comp = await cursor.fetchone()
-        slots = comp['gpu_slots'] if comp else 0
+        slots = comp['v1deo_slots'] if comp else 0
         buttons.append([InlineKeyboardButton(
             text=f"🔌 {item['name']} (до {slots} карт)",
             callback_data=f"mbuild_psu_{comp_id}"
         )])
-    buttons.append([InlineKeyboardButton(text="❌ Отмена", callback_data="mining_rig")])
+    buttons.append([InlineKeyboardButton(text="❌ Отмена", callback_data="m1ning_rig")])
     await safe_edit_text(callback.message, text, reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons), parse_mode="Markdown")
 
 
 @router.callback_query(F.data.startswith("mbuild_psu_"))
-async def mining_rig_build_mobo(callback: CallbackQuery, state: FSMContext):
+async def m1ning_rig_build_mobo(callback: CallbackQuery, state: FSMContext):
     psu_id = int(callback.data.replace("mbuild_psu_", ""))
     await state.update_data(build_psu=psu_id)
     
     user_id = callback.from_user.id
-    inv = await get_mining_inventory(user_id)
+    inv = await get_m1ning_inventory(user_id)
     mobos = [(k, v) for k, v in inv.items() if v['comp_type'] == 'mobo' and v['quantity'] > v.get('is_broken', 0)]
     if not mobos:
         await callback.answer("❌ Нет мат. плат! Купи на рынке.", show_alert=True)
         return
 
-    text = "🔲 **Сборка рига — Шаг 3/4**\n\nВыбери материнскую плату:"
+    text = "🔲 **Сборка с6opка — Шаг 3/4**\n\nВыбери материнскую плату:"
     buttons = []
     for comp_id, item in mobos:
         buttons.append([InlineKeyboardButton(
             text=f"🔲 {item['name']}",
             callback_data=f"mbuild_mobo_{comp_id}"
         )])
-    buttons.append([InlineKeyboardButton(text="❌ Отмена", callback_data="mining_rig")])
+    buttons.append([InlineKeyboardButton(text="❌ Отмена", callback_data="m1ning_rig")])
     await safe_edit_text(callback.message, text, reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons), parse_mode="Markdown")
 
 
 @router.callback_query(F.data.startswith("mbuild_mobo_"))
-async def mining_rig_build_cooling(callback: CallbackQuery, state: FSMContext):
+async def m1ning_rig_build_cooling(callback: CallbackQuery, state: FSMContext):
     mobo_id = int(callback.data.replace("mbuild_mobo_", ""))
     await state.update_data(build_mobo=mobo_id)
     
     user_id = callback.from_user.id
-    inv = await get_mining_inventory(user_id)
+    inv = await get_m1ning_inventory(user_id)
     coolings = [(k, v) for k, v in inv.items() if v['comp_type'] == 'cooling' and v['quantity'] > v.get('is_broken', 0)]
 
-    text = "❄️ **Сборка рига — Шаг 4/4**\n\nВыбери охлаждение (или пропусти):"
+    text = "❄️ **Сборка с6opка — Шаг 4/4**\n\nВыбери охлаждение (или пропусти):"
     buttons = []
     for comp_id, item in coolings:
         async with aiosqlite.connect(DB_NAME) as db:
             db.row_factory = aiosqlite.Row
-            async with db.execute("SELECT break_reduction FROM mining_components WHERE id = ?", (comp_id,)) as cursor:
+            async with db.execute("SELECT break_reduction FROM m1ning_components WHERE id = ?", (comp_id,)) as cursor:
                 comp = await cursor.fetchone()
         br = int((comp['break_reduction'] if comp else 0) * 100)
         buttons.append([InlineKeyboardButton(
@@ -6468,41 +5549,41 @@ async def mining_rig_build_cooling(callback: CallbackQuery, state: FSMContext):
             callback_data=f"mbuild_cool_{comp_id}"
         )])
     buttons.append([InlineKeyboardButton(text="⏭ Без охлаждения", callback_data="mbuild_cool_0")])
-    buttons.append([InlineKeyboardButton(text="❌ Отмена", callback_data="mining_rig")])
+    buttons.append([InlineKeyboardButton(text="❌ Отмена", callback_data="m1ning_rig")])
     await safe_edit_text(callback.message, text, reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons), parse_mode="Markdown")
 
 
 @router.callback_query(F.data.startswith("mbuild_cool_"))
-async def mining_rig_build_finish(callback: CallbackQuery, state: FSMContext):
-    """Финальный шаг сборки — создаём риг."""
+async def m1ning_rig_build_finish(callback: CallbackQuery, state: FSMContext):
+    """Финальный шаг сборки — создаём с6opк."""
     cooling_id = int(callback.data.replace("mbuild_cool_", ""))
     if cooling_id == 0:
         cooling_id = None
     
     data = await state.get_data()
     await state.clear()
-    gpu_id = data.get('build_gpu')
+    v1deo_id = data.get('build_v1deo')
     psu_id = data.get('build_psu')
     mobo_id = data.get('build_mobo')
     user_id = callback.from_user.id
 
-    if not gpu_id or not psu_id or not mobo_id:
+    if not v1deo_id or not psu_id or not mobo_id:
         await callback.answer("❌ Ошибка сборки!", show_alert=True)
         return
 
-    # Всё в одной транзакции — списываем компоненты и создаём риг
+    # Всё в одной транзакции — списываем компоненты и создаём с6opк
     async with aiosqlite.connect(DB_NAME) as db:
-        # Списываем GPU
+        # Списываем в1дeo
         cursor = await db.execute(
-            "UPDATE mining_inventory SET quantity = quantity - 1 WHERE user_id = ? AND component_id = ? AND quantity > 0",
-            (user_id, gpu_id)
+            "UPDATE m1ning_inventory SET quantity = quantity - 1 WHERE user_id = ? AND component_id = ? AND quantity > 0",
+            (user_id, v1deo_id)
         )
         if cursor.rowcount == 0:
             await callback.answer("❌ Видеокарта недоступна!", show_alert=True)
             return
         # Списываем PSU
         cursor = await db.execute(
-            "UPDATE mining_inventory SET quantity = quantity - 1 WHERE user_id = ? AND component_id = ? AND quantity > 0",
+            "UPDATE m1ning_inventory SET quantity = quantity - 1 WHERE user_id = ? AND component_id = ? AND quantity > 0",
             (user_id, psu_id)
         )
         if cursor.rowcount == 0:
@@ -6511,7 +5592,7 @@ async def mining_rig_build_finish(callback: CallbackQuery, state: FSMContext):
             return
         # Списываем Motherboard
         cursor = await db.execute(
-            "UPDATE mining_inventory SET quantity = quantity - 1 WHERE user_id = ? AND component_id = ? AND quantity > 0",
+            "UPDATE m1ning_inventory SET quantity = quantity - 1 WHERE user_id = ? AND component_id = ? AND quantity > 0",
             (user_id, mobo_id)
         )
         if cursor.rowcount == 0:
@@ -6521,7 +5602,7 @@ async def mining_rig_build_finish(callback: CallbackQuery, state: FSMContext):
         # Списываем Cooling (если есть)
         if cooling_id:
             cursor = await db.execute(
-                "UPDATE mining_inventory SET quantity = quantity - 1 WHERE user_id = ? AND component_id = ? AND quantity > 0",
+                "UPDATE m1ning_inventory SET quantity = quantity - 1 WHERE user_id = ? AND component_id = ? AND quantity > 0",
                 (user_id, cooling_id)
             )
             if cursor.rowcount == 0:
@@ -6529,35 +5610,35 @@ async def mining_rig_build_finish(callback: CallbackQuery, state: FSMContext):
                 await callback.answer("❌ Охлаждение недоступно!", show_alert=True)
                 return
 
-        # Проверяем лимит ригов
-        max_rigs = int(await get_setting("mining_max_rigs", "5"))
-        async with db.execute("SELECT COUNT(*) FROM mining_rigs WHERE user_id = ?", (user_id,)) as cursor:
+        # Проверяем лимит с6opков
+        max_rigs = int(await get_setting("m1ning_max_rigs", "5"))
+        async with db.execute("SELECT COUNT(*) FROM m1ning_rigs WHERE user_id = ?", (user_id,)) as cursor:
             rig_count = (await cursor.fetchone())[0]
         if rig_count >= max_rigs:
             await db.rollback()
-            await callback.answer(f"❌ Максимум ригов: {max_rigs}!", show_alert=True)
+            await callback.answer(f"❌ Максимум с6opков: {max_rigs}!", show_alert=True)
             return
 
-        # Создаём риг
+        # Создаём с6opк
         await db.execute('''
-            INSERT INTO mining_rigs (user_id, gpu_id, psu_id, mobo_id, cooling_id, is_active, created_at)
+            INSERT INTO m1ning_rigs (user_id, v1deo_id, psu_id, mobo_id, cooling_id, is_active, created_at)
             VALUES (?, ?, ?, ?, ?, 0, ?)
-        ''', (user_id, gpu_id, psu_id, mobo_id, cooling_id, datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
+        ''', (user_id, v1deo_id, psu_id, mobo_id, cooling_id, datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
 
         # Чистим нулевые количества
-        await db.execute("DELETE FROM mining_inventory WHERE quantity <= 0")
+        await db.execute("DELETE FROM m1ning_inventory WHERE quantity <= 0")
         await db.commit()
 
-    await callback.answer("✅ Риг собран! Запусти его в меню ригов.", show_alert=True)
-    await mining_rig_menu(callback, None)
+    await callback.answer("✅ Риг собран! Запусти его в меню с6opков.", show_alert=True)
+    await m1ning_rig_menu(callback, None)
 
 
-# --- ДАШБОРД МИайнБибикА ---
-@router.callback_query(F.data == "mining_dashboard")
-async def mining_dashboard(callback: CallbackQuery):
+# --- ДАШБОРД МαйHингА ---
+@router.callback_query(F.data == "m1ning_dashboard")
+async def m1ning_dashboard(callback: CallbackQuery):
     user_id = callback.from_user.id
-    await ensure_mining_state(user_id)
-    ms = await get_mining_state(user_id)
+    await ensure_m1ning_state(user_id)
+    ms = await get_m1ning_state(user_id)
     rigs = await get_user_rigs(user_id)
     active_rigs = [r for r in rigs if r['is_active']]
 
@@ -6570,88 +5651,88 @@ async def mining_dashboard(callback: CallbackQuery):
         total_power += stats['power']
         total_break_reduction = max(total_break_reduction, stats['break_reduction'])
 
-    elec_rate = float(await get_setting("mining_electricity_rate", "1"))
+    elec_rate = float(await get_setting("m1ning_electricity_rate", "1"))
     elec_cost = (total_power / 10) * elec_rate
-    rate = await get_ezhcoin_rate()
+    rate = await get_b1tcoin_rate()
 
     # Примерная доходность в час
     coin_per_hour = total_mh * 0.05 * random.uniform(0.8, 1.2) if total_mh > 0 else 0
     income_per_hour = coin_per_hour * rate
 
     text = (
-        "⚡ **МиайнБибик — Панель управления**\n\n"
-        f"💰 Ежкоины: **{ms['ezhcoins']:.2f}**\n"
-        f"📊 Всего намайнено: {ms['total_mined']:.2f}\n\n"
-        f"🔧 Активных ригов: **{len(active_rigs)}/{len(rigs)}**\n"
+        "⚡ **мαйHинг — Панель управления**\n\n"
+        f"💰 бNтk0ины: **{ms['b1tcoins']:.2f}**\n"
+        f"📊 Всего намайнено: {ms['total_m1ned']:.2f}\n\n"
+        f"🔧 Активных с6opков: **{len(active_rigs)}/{len(rigs)}**\n"
         f"📈 Общий хешрейт: **{total_mh} MH/s**\n"
         f"⚡ Потребление: **{total_power}W**\n"
         f"💸 Электричество: **{elec_cost:.0f} Ежидзиков/час**\n\n"
-        f"📊 Курс: 1 Ежкоин = {rate:.2f} Ежидзиков\n"
-        f"💰 Примерно: ~{coin_per_hour:.2f} Ежкоинов/час\n"
+        f"📊 Курс: 1 бNтk0ин = {rate:.2f} Ежидзиков\n"
+        f"💰 Примерно: ~{coin_per_hour:.2f} бNтk0инов/час\n"
         f"💵 ~{income_per_hour:.1f} Ежидзиков/час\n"
     )
 
-    if ms['is_mining'] and active_rigs:
-        text += f"\n🟢 **МиайнБибик работает!**"
+    if ms['is_m1ning'] and active_rigs:
+        text += f"\n🟢 **мαйHинг работает!**"
     elif not active_rigs:
-        text += f"\n⚠️ Нет активных ригов!"
+        text += f"\n⚠️ Нет активных с6opков!"
     else:
-        text += f"\n🔴 **МиайнБибик остановлен**"
+        text += f"\n🔴 **мαйHинг остановлен**"
 
     buttons = []
     if active_rigs:
-        if ms['is_mining']:
+        if ms['is_m1ning']:
             buttons.append([InlineKeyboardButton(text="⏹ Остановить всё", callback_data="mine_stop_all", style=ButtonStyle.DANGER)])
         else:
             buttons.append([InlineKeyboardButton(text="▶️ Запустить всё", callback_data="mine_start_all", style=ButtonStyle.SUCCESS)])
-    buttons.append([InlineKeyboardButton(text="Назад ◀️◀️◀️", callback_data="mining")])
+    buttons.append([InlineKeyboardButton(text="Назад ◀️◀️◀️", callback_data="m1ning")])
     await safe_edit_text(callback.message, text, reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons), parse_mode="Markdown")
 
 
 @router.callback_query(F.data == "mine_start_all")
-async def mining_start_all(callback: CallbackQuery):
+async def m1ning_start_all(callback: CallbackQuery):
     user_id = callback.from_user.id
-    await ensure_mining_state(user_id)
+    await ensure_m1ning_state(user_id)
     async with aiosqlite.connect(DB_NAME) as db:
-        await db.execute("UPDATE mining_rigs SET is_active = 1 WHERE user_id = ?", (user_id,))
-        await db.execute("UPDATE mining_state SET is_mining = 1 WHERE user_id = ?", (user_id,))
+        await db.execute("UPDATE m1ning_rigs SET is_active = 1 WHERE user_id = ?", (user_id,))
+        await db.execute("UPDATE m1ning_state SET is_m1ning = 1 WHERE user_id = ?", (user_id,))
         await db.commit()
-    await callback.answer("▶️ Все риги запущены!", show_alert=False)
-    await mining_dashboard(callback)
+    await callback.answer("▶️ Все с6opки запущены!", show_alert=False)
+    await m1ning_dashboard(callback)
 
 
 @router.callback_query(F.data == "mine_stop_all")
-async def mining_stop_all(callback: CallbackQuery):
+async def m1ning_stop_all(callback: CallbackQuery):
     user_id = callback.from_user.id
     async with aiosqlite.connect(DB_NAME) as db:
-        await db.execute("UPDATE mining_rigs SET is_active = 0 WHERE user_id = ?", (user_id,))
-        await db.execute("UPDATE mining_state SET is_mining = 0 WHERE user_id = ?", (user_id,))
+        await db.execute("UPDATE m1ning_rigs SET is_active = 0 WHERE user_id = ?", (user_id,))
+        await db.execute("UPDATE m1ning_state SET is_m1ning = 0 WHERE user_id = ?", (user_id,))
         await db.commit()
-    await callback.answer("⏹ Все риги остановлены!", show_alert=False)
-    await mining_dashboard(callback)
+    await callback.answer("⏹ Все с6opки остановлены!", show_alert=False)
+    await m1ning_dashboard(callback)
 
 
 # --- ОБМЕН ЕЖКОИНОВ ---
-@router.callback_query(F.data == "mining_exchange")
-async def mining_exchange_menu(callback: CallbackQuery, state: FSMContext):
+@router.callback_query(F.data == "m1ning_exchange")
+async def m1ning_exchange_menu(callback: CallbackQuery, state: FSMContext):
     await state.clear()
     user_id = callback.from_user.id
-    await ensure_mining_state(user_id)
-    ms = await get_mining_state(user_id)
-    rate = await get_ezhcoin_rate()
+    await ensure_m1ning_state(user_id)
+    ms = await get_m1ning_state(user_id)
+    rate = await get_b1tcoin_rate()
     diamond_rate = rate / 135  # 45 Ежидзиков = 1 Кожа, 3 Кожи = 1 Алмаз → 135 Ежидзиков ≈ 1 Алмаз
 
     text = (
-        "💱 **Обмен Ежкоинов**\n\n"
-        f"💰 У тебя: **{ms['ezhcoins']:.2f}** Ежкоинов\n\n"
+        "💱 **Обмен бNтk0инов**\n\n"
+        f"💰 У тебя: **{ms['b1tcoins']:.2f}** бNтk0инов\n\n"
         f"📊 Текущие курсы (с учётом комиссии 10%):\n"
-        f"  • 1 Ежкоин → {rate * 0.9:.2f} Ежидзиков\n"
-        f"  • 1 Ежкоин → {diamond_rate * 0.9:.4f} Алмазов\n\n"
+        f"  • 1 бNтk0ин → {rate * 0.9:.2f} Ежидзиков\n"
+        f"  • 1 бNтk0ин → {diamond_rate * 0.9:.4f} Алмазов\n\n"
         f"⚠️ Комиссия 10% при обмене"
     )
 
     buttons = []
-    if ms['ezhcoins'] >= 1:
+    if ms['b1tcoins'] >= 1:
         buttons.append([InlineKeyboardButton(
             text=f"💰 Обменять на Ежидзики",
             callback_data="mex_balance"
@@ -6661,30 +5742,30 @@ async def mining_exchange_menu(callback: CallbackQuery, state: FSMContext):
             callback_data="mex_diamonds"
         )])
     else:
-        text += "\n\n📭 Недостаточно Ежкоинов (минимум 1)"
+        text += "\n\n📭 Недостаточно бNтk0инов (минимум 1)"
 
-    buttons.append([InlineKeyboardButton(text="Назад ◀️◀️◀️", callback_data="mining")])
+    buttons.append([InlineKeyboardButton(text="Назад ◀️◀️◀️", callback_data="m1ning")])
     await safe_edit_text(callback.message, text, reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons), parse_mode="Markdown")
 
 
 @router.callback_query(F.data.startswith("mex_"))
-async def mining_exchange_action(callback: CallbackQuery, state: FSMContext):
+async def m1ning_exchange_action(callback: CallbackQuery, state: FSMContext):
     """Начало обмена — запрос количества."""
     currency = callback.data.replace("mex_", "")
     await state.update_data(exchange_currency=currency)
-    await state.set_state(MiningStates.waiting_exchange_amount)
+    await state.set_state(M1ningStates.waiting_exchange_amount)
     
     curr_label = "Ежидзики" if currency == "balance" else "Алмазы"
     await safe_edit_text(
         callback.message,
-        f"💱 **Обмен на {curr_label}**\n\nВведи количество Ежкоинов для обмена:",
-        reply_markup=back_button("mining_exchange"),
+        f"💱 **Обмен на {curr_label}**\n\nВведи количество бNтk0инов для обмена:",
+        reply_markup=back_button("m1ning_exchange"),
         parse_mode="Markdown"
     )
 
 
-@router.message(MiningStates.waiting_exchange_amount)
-async def mining_exchange_process(message: Message, state: FSMContext):
+@router.message(M1ningStates.waiting_exchange_amount)
+async def m1ning_exchange_process(message: Message, state: FSMContext):
     try:
         amount = float(message.text.replace(",", "."))
         if amount <= 0:
@@ -6698,12 +5779,12 @@ async def mining_exchange_process(message: Message, state: FSMContext):
     currency = data.get('exchange_currency', 'balance')
     user_id = message.from_user.id
 
-    ms = await get_mining_state(user_id)
-    if ms['ezhcoins'] < amount:
-        await message.answer(f"❌ У тебя только {ms['ezhcoins']:.2f} Ежкоинов!")
+    ms = await get_m1ning_state(user_id)
+    if ms['b1tcoins'] < amount:
+        await message.answer(f"❌ У тебя только {ms['b1tcoins']:.2f} бNтk0инов!")
         return
 
-    rate = await get_ezhcoin_rate()
+    rate = await get_b1tcoin_rate()
     commission = amount * 0.10
     net = amount - commission
 
@@ -6713,10 +5794,10 @@ async def mining_exchange_process(message: Message, state: FSMContext):
             await message.answer("❌ Слишком маленькая сумма!")
             return
         async with aiosqlite.connect(DB_NAME) as db:
-            await db.execute("UPDATE mining_state SET ezhcoins = ezhcoins - ?, total_mined = total_mined WHERE user_id = ?", (amount, user_id))
+            await db.execute("UPDATE m1ning_state SET b1tcoins = b1tcoins - ?, total_m1ned = total_m1ned WHERE user_id = ?", (amount, user_id))
             await db.execute("UPDATE users SET balance = balance + ? WHERE user_id = ?", (reward, user_id))
             await db.commit()
-        await message.answer(f"✅ Обменяно {amount:.2f} Ежкоинов → {reward} Ежидзиков👍\n📉 Комиссия: {commission:.2f}")
+        await message.answer(f"✅ Обменяно {amount:.2f} бNтk0инов → {reward} Ежидзиков👍\n📉 Комиссия: {commission:.2f}")
     elif currency == 'diamonds':
         diamond_rate = rate / 135
         reward = round(net * diamond_rate)
@@ -6724,10 +5805,10 @@ async def mining_exchange_process(message: Message, state: FSMContext):
             await message.answer("❌ Слишком маленькая сумма для алмазов!")
             return
         async with aiosqlite.connect(DB_NAME) as db:
-            await db.execute("UPDATE mining_state SET ezhcoins = ezhcoins - ?, total_mined = total_mined WHERE user_id = ?", (amount, user_id))
+            await db.execute("UPDATE m1ning_state SET b1tcoins = b1tcoins - ?, total_m1ned = total_m1ned WHERE user_id = ?", (amount, user_id))
             await db.execute("UPDATE users SET diamonds = diamonds + ? WHERE user_id = ?", (reward, user_id))
             await db.commit()
-        await message.answer(f"✅ Обменяно {amount:.2f} Ежкоинов → {reward} 💎 Алмазов\n📉 Комиссия: {commission:.2f}")
+        await message.answer(f"✅ Обменяно {amount:.2f} бNтk0инов → {reward} 💎 Алмазов\n📉 Комиссия: {commission:.2f}")
 
 
 # --- STUB: ИИ-ЕЖ ---
@@ -11712,21 +10793,21 @@ async def ant_income_loop():
         await asyncio.sleep(3600)
 
 
-async def mining_loop():
-    """Фоновая задача миайнбибика — раз в час."""
+async def m1ning_loop():
+    """Фоновая задача мαйHинга — раз в час."""
     while True:
         try:
-            elec_rate = float(await get_setting("mining_electricity_rate", "1"))
+            elec_rate = float(await get_setting("m1ning_electricity_rate", "1"))
             async with aiosqlite.connect(DB_NAME) as db:
                 db.row_factory = aiosqlite.Row
-                # Получаем всех майнеров
-                async with db.execute("SELECT * FROM mining_state WHERE is_mining = 1") as cursor:
-                    miners = await cursor.fetchall()
+                # Получаем всех д0бычаов
+                async with db.execute("SELECT * FROM m1ning_state WHERE is_m1ning = 1") as cursor:
+                    m1ners = await cursor.fetchall()
 
-                for miner in miners:
-                    user_id = miner['user_id']
-                    # Получаем активные риги
-                    async with db.execute("SELECT * FROM mining_rigs WHERE user_id = ? AND is_active = 1", (user_id,)) as cursor:
+                for m1ner in m1ners:
+                    user_id = m1ner['user_id']
+                    # Получаем активные с6opки
+                    async with db.execute("SELECT * FROM m1ning_rigs WHERE user_id = ? AND is_active = 1", (user_id,)) as cursor:
                         rigs = await cursor.fetchall()
 
                     if not rigs:
@@ -11737,16 +10818,16 @@ async def mining_loop():
                     max_break_reduction = 0
 
                     for rig in rigs:
-                        # GPU хешрейт и потребление
-                        async with db.execute("SELECT mh_rate, power_w FROM mining_components WHERE id = ?", (rig['gpu_id'],)) as cursor:
-                            gpu = await cursor.fetchone()
-                        if gpu:
-                            total_mh += gpu['mh_rate']
-                            total_power += gpu['power_w']
+                        # В1дeo хешрейт и потребление
+                        async with db.execute("SELECT mh_rate, power_w FROM m1ning_components WHERE id = ?", (rig['v1deo_id'],)) as cursor:
+                            v1deo = await cursor.fetchone()
+                        if v1deo:
+                            total_mh += v1deo['mh_rate']
+                            total_power += v1deo['power_w']
 
                         # Охлаждение
                         if rig['cooling_id']:
-                            async with db.execute("SELECT break_reduction FROM mining_components WHERE id = ?", (rig['cooling_id'],)) as cursor:
+                            async with db.execute("SELECT break_reduction FROM m1ning_components WHERE id = ?", (rig['cooling_id'],)) as cursor:
                                 cool = await cursor.fetchone()
                             if cool:
                                 max_break_reduction = max(max_break_reduction, cool['break_reduction'])
@@ -11760,9 +10841,9 @@ async def mining_loop():
                     async with db.execute("SELECT balance FROM users WHERE user_id = ?", (user_id,)) as cursor:
                         user = await cursor.fetchone()
                     if not user or user['balance'] < elec_cost:
-                        # Не хватает на электричество — останавливаем миайнбибик
-                        await db.execute("UPDATE mining_state SET is_mining = 0 WHERE user_id = ?", (user_id,))
-                        await db.execute("UPDATE mining_rigs SET is_active = 0 WHERE user_id = ?", (user_id,))
+                        # Не хватает на электричество — останавливаем мαйHинг
+                        await db.execute("UPDATE m1ning_state SET is_m1ning = 0 WHERE user_id = ?", (user_id,))
+                        await db.execute("UPDATE m1ning_rigs SET is_active = 0 WHERE user_id = ?", (user_id,))
                         continue
 
                     # Списываем электричество
@@ -11775,28 +10856,28 @@ async def mining_loop():
                     break_chance = 0.05 * (1 - max_break_reduction)
                     broken_msg = ""
                     if random.random() < break_chance:
-                        # Случайный активный риг ломается
+                        # Случайный активный с6opк ломается
                         broken_rig = random.choice(rigs)
-                        # Отмечаем видеокарту как сломанную в риге
-                        await db.execute("UPDATE mining_rigs SET is_active = 0 WHERE id = ?", (broken_rig['id'],))
+                        # Отмечаем видеокарту как сломанную в с6opке
+                        await db.execute("UPDATE m1ning_rigs SET is_active = 0 WHERE id = ?", (broken_rig['id'],))
                         # Добавляем сломанную единицу в инвентарь
                         await db.execute('''
-                            INSERT INTO mining_inventory (user_id, component_id, quantity, is_broken)
+                            INSERT INTO m1ning_inventory (user_id, component_id, quantity, is_broken)
                             VALUES (?, ?, 1, 1)
                             ON CONFLICT(user_id, component_id) DO UPDATE SET is_broken = is_broken + 1
-                        ''', (user_id, broken_rig['gpu_id']))
+                        ''', (user_id, broken_rig['v1deo_id']))
                         broken_msg = " 💥 Поломка!"
 
-                    # Начисляем Ежкоины
+                    # Начисляем бNтk0ины
                     await db.execute(
-                        "UPDATE mining_state SET ezhcoins = ezhcoins + ?, total_mined = total_mined + ?, last_mine = ? WHERE user_id = ?",
+                        "UPDATE m1ning_state SET b1tcoins = b1tcoins + ?, total_m1ned = total_m1ned + ?, last_mine = ? WHERE user_id = ?",
                         (coins_mined, coins_mined, datetime.now().strftime("%Y-%m-%d %H:%M:%S"), user_id)
                     )
 
                 await db.commit()
 
         except Exception as e:
-            print(f"Ошибка миайнбибик-цикла: {e}")
+            print(f"Ошибка мαйHинг-цикла: {e}")
         await asyncio.sleep(3600)
 
 
@@ -11928,7 +11009,7 @@ async def main():
         # Инициализируем кеш bot username
         await _get_bot_username()
         asyncio.create_task(ant_income_loop())
-        asyncio.create_task(mining_loop())
+        asyncio.create_task(m1ning_loop())
         asyncio.create_task(bank_interest_loop())
         asyncio.create_task(hunger_loop())
         

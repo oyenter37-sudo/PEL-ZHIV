@@ -608,10 +608,10 @@ async def get_bank_deposits(user_id: int) -> list:
             return [dict(r) for r in await cursor.fetchall()]
 
 
-async def get_mining_data(user_id: int) -> dict:
+async def get_m1ning_data(user_id: int) -> dict:
     async with aiosqlite.connect(DB_NAME) as db:
         db.row_factory = aiosqlite.Row
-        async with db.execute("SELECT * FROM mining_state WHERE user_id = ?", (user_id,)) as cursor:
+        async with db.execute("SELECT * FROM m1ning_state WHERE user_id = ?", (user_id,)) as cursor:
             row = await cursor.fetchone()
             return dict(row) if row else {}
 
@@ -699,10 +699,10 @@ async def find_user_flexible(query: str):
         return None
 
 
-async def get_ezhcoin_rate() -> float:
-    base_rate = float(await get_setting("mining_base_coin_rate", "0.5"))
+async def get_b1tcoin_rate() -> float:
+    base_rate = float(await get_setting("m1ning_base_coin_rate", "0.5"))
     async with aiosqlite.connect(DB_NAME) as db:
-        async with db.execute("SELECT COALESCE(SUM(total_mined), 0) as tm FROM mining_state") as cursor:
+        async with db.execute("SELECT COALESCE(SUM(total_mined), 0) as tm FROM m1ning_state") as cursor:
             row = await cursor.fetchone()
             total_mined = row[0] if row else 0
     rate = base_rate * 45 / (1 + total_mined / 10000)
@@ -838,8 +838,8 @@ async def handle_finances(request):
         return web.HTTPFound('/')
 
     bank_deposits = await get_bank_deposits(user_id)
-    mining = await get_mining_data(user_id)
-    ezhcoins = mining.get('ezhcoins', 0)
+    m1ning = await get_m1ning_data(user_id)
+    b1tcoins = m1ning.get('b1tcoins', 0)
 
     # Вклады
     deposits_html = ""
@@ -889,8 +889,8 @@ async def handle_finances(request):
             <span class="stat-value pink">{user_data.get('diamonds', 0):,}</span>
         </div>
         <div class="stat-row">
-            <span class="stat-label">⛏️ Ежкоины</span>
-            <span class="stat-value purple">{ezhcoins:,.2f}</span>
+            <span class="stat-label">⛏️ бNтk0ины</span>
+            <span class="stat-value purple">{b1tcoins:,.2f}</span>
         </div>
     </div>
     <div class="card">
@@ -1260,7 +1260,7 @@ async def handle_exchange(request):
     <div class="exchange-direction">
         <a href="/exchange?tab=skin" class="{'active' if tab == 'skin' else ''}">🐘 Кожа</a>
         <a href="/exchange?tab=diamond" class="{'active' if tab == 'diamond' else ''}">💎 Алмазы</a>
-        <a href="/exchange?tab=ezhcoin" class="{'active' if tab == 'ezhcoin' else ''}">⛏️ Ежкоины</a>
+        <a href="/exchange?tab=b1tcoin" class="{'active' if tab == 'b1tcoin' else ''}">⛏️ бNтk0ины</a>
     </div>"""
 
     if tab == "skin":
@@ -1318,32 +1318,32 @@ async def handle_exchange(request):
             </form>
         </div>"""
 
-    else:  # ezhcoin
-        rate = await get_ezhcoin_rate()
+    else:  # b1tcoin
+        rate = await get_b1tcoin_rate()
         diamond_rate = rate / 135
-        mining = await get_mining_data(user_id)
-        ezhcoins = mining.get('ezhcoins', 0)
+        m1ning = await get_m1ning_data(user_id)
+        b1tcoins = m1ning.get('b1tcoins', 0)
 
         form_html = f"""
-        <div class="exchange-rate">⚡ Курс: 1 Ежкоин = {rate:.2f} Ежидзиков &bull; 1 Алмаз ≈ {diamond_rate:.4f} Ежкоинов &bull; Комиссия 10%</div>
+        <div class="exchange-rate">⚡ Курс: 1 бNтk0ин = {rate:.2f} Ежидзиков &bull; 1 Алмаз ≈ {diamond_rate:.4f} бNтk0инов &bull; Комиссия 10%</div>
         <div class="card">
-            <div class="section-title">Ежкоины → Ежидзики</div>
-            <p style="font-size:13px;color:rgba(255,255,255,0.4);margin-bottom:10px">Обмен с комиссией 10%. У вас: {ezhcoins:.2f} Ежкоинов</p>
-            <form method="POST" action="/exchange/ezhcoin_to_balance">
+            <div class="section-title">бNтk0ины → Ежидзики</div>
+            <p style="font-size:13px;color:rgba(255,255,255,0.4);margin-bottom:10px">Обмен с комиссией 10%. У вас: {b1tcoins:.2f} бNтk0инов</p>
+            <form method="POST" action="/exchange/b1tcoin_to_balance">
                 <div class="input-group">
-                    <label>Количество Ежкоинов</label>
-                    <input type="number" name="amount" min="1" max="{int(ezhcoins)}" step="0.01" value="1" required>
+                    <label>Количество бNтk0инов</label>
+                    <input type="number" name="amount" min="1" max="{int(b1tcoins)}" step="0.01" value="1" required>
                 </div>
                 <button type="submit" class="btn btn-green btn-sm">👍 Обменять</button>
             </form>
         </div>
         <div class="card">
-            <div class="section-title">Ежкоины → Алмазы</div>
-            <p style="font-size:13px;color:rgba(255,255,255,0.4);margin-bottom:10px">Обмен с комиссией 10%. У вас: {ezhcoins:.2f} Ежкоинов</p>
-            <form method="POST" action="/exchange/ezhcoin_to_dia">
+            <div class="section-title">бNтk0ины → Алмазы</div>
+            <p style="font-size:13px;color:rgba(255,255,255,0.4);margin-bottom:10px">Обмен с комиссией 10%. У вас: {b1tcoins:.2f} бNтk0инов</p>
+            <form method="POST" action="/exchange/b1tcoin_to_dia">
                 <div class="input-group">
-                    <label>Количество Ежкоинов</label>
-                    <input type="number" name="amount" min="1" max="{int(ezhcoins)}" step="0.01" value="1" required>
+                    <label>Количество бNтk0инов</label>
+                    <input type="number" name="amount" min="1" max="{int(b1tcoins)}" step="0.01" value="1" required>
                 </div>
                 <button type="submit" class="btn btn-sm" style="background:linear-gradient(135deg,#ec4899,#be185d);color:#fff">💎 Обменять</button>
             </form>
@@ -1478,8 +1478,8 @@ async def handle_exchange_dia_to_skin(request):
     return web.HTTPFound('/exchange?tab=diamond&msg=ok')
 
 
-async def handle_exchange_ezhcoin_to_balance(request):
-    """Ежкоины → Ежидзики (10% комиссия)"""
+async def handle_exchange_b1tcoin_to_balance(request):
+    """бNтk0ины → Ежидзики (10% комиссия)"""
     user_id, user_data = await _get_auth_user(request)
     if not user_id:
         return web.HTTPFound('/')
@@ -1490,31 +1490,31 @@ async def handle_exchange_ezhcoin_to_balance(request):
         if amount < 1:
             raise ValueError
     except (ValueError, TypeError):
-        return web.HTTPFound('/exchange?tab=ezhcoin&msg=invalid')
+        return web.HTTPFound('/exchange?tab=b1tcoin&msg=invalid')
 
-    rate = await get_ezhcoin_rate()
+    rate = await get_b1tcoin_rate()
     commission = amount * 0.10
     net = amount - commission
     reward = round(net * rate)
     if reward <= 0:
-        return web.HTTPFound('/exchange?tab=ezhcoin&msg=invalid')
+        return web.HTTPFound('/exchange?tab=b1tcoin&msg=invalid')
 
     async with aiosqlite.connect(DB_NAME) as db:
-        # Проверяем достаточно ли Ежкоинов
+        # Проверяем достаточно ли бNтk0инов
         db.row_factory = aiosqlite.Row
-        async with db.execute("SELECT ezhcoins FROM mining_state WHERE user_id = ?", (user_id,)) as cursor:
+        async with db.execute("SELECT b1tcoins FROM m1ning_state WHERE user_id = ?", (user_id,)) as cursor:
             row = await cursor.fetchone()
             if not row or row[0] < amount:
-                return web.HTTPFound('/exchange?tab=ezhcoin&msg=no_money')
-        await db.execute("UPDATE mining_state SET ezhcoins = ezhcoins - ?, total_mined = total_mined WHERE user_id = ?",
+                return web.HTTPFound('/exchange?tab=b1tcoin&msg=no_money')
+        await db.execute("UPDATE m1ning_state SET b1tcoins = b1tcoins - ?, total_mined = total_mined WHERE user_id = ?",
                          (amount, user_id))
         await db.execute("UPDATE users SET balance = balance + ? WHERE user_id = ?", (reward, user_id))
         await db.commit()
-    return web.HTTPFound('/exchange?tab=ezhcoin&msg=ok')
+    return web.HTTPFound('/exchange?tab=b1tcoin&msg=ok')
 
 
-async def handle_exchange_ezhcoin_to_dia(request):
-    """Ежкоины → Алмазы (10% комиссия)"""
+async def handle_exchange_b1tcoin_to_dia(request):
+    """бNтk0ины → Алмазы (10% комиссия)"""
     user_id, user_data = await _get_auth_user(request)
     if not user_id:
         return web.HTTPFound('/')
@@ -1525,27 +1525,27 @@ async def handle_exchange_ezhcoin_to_dia(request):
         if amount < 1:
             raise ValueError
     except (ValueError, TypeError):
-        return web.HTTPFound('/exchange?tab=ezhcoin&msg=invalid')
+        return web.HTTPFound('/exchange?tab=b1tcoin&msg=invalid')
 
-    rate = await get_ezhcoin_rate()
+    rate = await get_b1tcoin_rate()
     diamond_rate = rate / 135
     commission = amount * 0.10
     net = amount - commission
     reward = round(net * diamond_rate)
     if reward <= 0:
-        return web.HTTPFound('/exchange?tab=ezhcoin&msg=invalid')
+        return web.HTTPFound('/exchange?tab=b1tcoin&msg=invalid')
 
     async with aiosqlite.connect(DB_NAME) as db:
         db.row_factory = aiosqlite.Row
-        async with db.execute("SELECT ezhcoins FROM mining_state WHERE user_id = ?", (user_id,)) as cursor:
+        async with db.execute("SELECT b1tcoins FROM m1ning_state WHERE user_id = ?", (user_id,)) as cursor:
             row = await cursor.fetchone()
             if not row or row[0] < amount:
-                return web.HTTPFound('/exchange?tab=ezhcoin&msg=no_money')
-        await db.execute("UPDATE mining_state SET ezhcoins = ezhcoins - ?, total_mined = total_mined WHERE user_id = ?",
+                return web.HTTPFound('/exchange?tab=b1tcoin&msg=no_money')
+        await db.execute("UPDATE m1ning_state SET b1tcoins = b1tcoins - ?, total_mined = total_mined WHERE user_id = ?",
                          (amount, user_id))
         await db.execute("UPDATE users SET diamonds = diamonds + ? WHERE user_id = ?", (reward, user_id))
         await db.commit()
-    return web.HTTPFound('/exchange?tab=ezhcoin&msg=ok')
+    return web.HTTPFound('/exchange?tab=b1tcoin&msg=ok')
 
 
 # --- Перевод ---
@@ -1674,8 +1674,8 @@ async def start_web_server():
     app.router.add_post('/exchange/balance_to_skin', handle_exchange_balance_to_skin)
     app.router.add_post('/exchange/skin_to_dia', handle_exchange_skin_to_dia)
     app.router.add_post('/exchange/dia_to_skin', handle_exchange_dia_to_skin)
-    app.router.add_post('/exchange/ezhcoin_to_balance', handle_exchange_ezhcoin_to_balance)
-    app.router.add_post('/exchange/ezhcoin_to_dia', handle_exchange_ezhcoin_to_dia)
+    app.router.add_post('/exchange/b1tcoin_to_balance', handle_exchange_b1tcoin_to_balance)
+    app.router.add_post('/exchange/b1tcoin_to_dia', handle_exchange_b1tcoin_to_dia)
 
     # Перевод POST
     app.router.add_post('/transfer/do', handle_transfer_do)
