@@ -57,7 +57,7 @@ AI_HEDGEHOG_SYSTEM = """Ты — Говорящий Еж 🦔, милый кол
 ХАРАКТЕР: милый, колючий, добрый, любишь яблоки и жуков, ленивый, фыркаешь, помогаешь игрокам. Говоришь коротко с эмодзи 🦔🍎🐜💎
 
 У тебя есть ИНСТРУМЕНТЫ — два вида:
-1) ИНФОРМАЦИОННЫЕ: узнать баланс, инвентарь, про ежа, банк, майнинг, муравьёв, разделы
+1) ИНФОРМАЦИОННЫЕ: узнать баланс, инвентарь, про ежа, банк, миайнбибик, муравьёв, разделы
 2) ДЕЙСТВИЯ: обменять валюту, перевести деньги, забрать бонус, поймать муравья, сыграть в Ежино
 
 СТРОЖАЙШИЕ ПРАВИЛА:
@@ -116,7 +116,7 @@ AI_TOOLS = [
         "type": "function",
         "function": {
             "name": "get_mining_info",
-            "description": "Узнать про майнинг: риги, Ежкоины, компоненты",
+            "description": "Узнать про миайнбибик: риги, Ежкоины, компоненты",
             "parameters": {"type": "object", "properties": {}, "required": []}
         }
     },
@@ -132,7 +132,7 @@ AI_TOOLS = [
         "type": "function",
         "function": {
             "name": "get_section_details",
-            "description": "Узнать подробности о разделе бота. section: одно из [меню, ежа, финансы, казино, алмазы, перевод, обменник, сайт, звонок, ключ, друзья, бонусы, поддержка, пазл, магазин, кузница, майнинг, домашнее_казино, банк, книги, муравьи, смерть, классы, цвета, еда]",
+            "description": "Узнать подробности о разделе бота. section: одно из [меню, ежа, финансы, казино, алмазы, перевод, обменник, сайт, звонок, ключ, друзья, бонусы, поддержка, пазл, магазин, кузница, миайнбибик, домашнее_казино, банк, книги, муравьи, смерть, классы, цвета, еда]",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -285,10 +285,10 @@ SECTION_DETAILS = {
     "друзья": "Реферальная система. Пригласивший: +20 ЕЖ, +0.3% к муравьям (макс 30%), x2 реклама 20мин, промокод на 10. Друг: 200 ЕЖ на старте вместо 0.",
     "бонусы": "Ежедневный бонус: 25 ЕЖ раз в 24ч. Реклама: 15-35 ЕЖ за просмотр (x2 после реферала 20мин). Промокоды: ввести код для награды.",
     "поддержка": "Написать в техподдержку, предложить обновление, inline промокоды (@bot pr КОД), политики использования и конфиденциальности.",
-    "пазл": "Дополнительные функции: Магазин, Кузница(крафт/шахты/аукцион), Майнинг(риги/Ежкоины), Домашнее казино, Image Test",
+    "пазл": "Дополнительные функции: Магазин, Кузница(крафт/шахты/аукцион), МиайнБибик(риги/Ежкоины), Домашнее казино, Image Test",
     "магазин": "Покупка товаров за Ежидзики. Мебель (стул, стол, кровать и т.д.) снижает голод. Аптечка лечит травму. 19 товаров.",
     "кузница": "Крафт: комбинируй предметы. Плавка: переплавляй в другие. Шахты: копай с шансом найти предмет. Аукцион: торгуй с игроками.",
-    "майнинг": "Сборка ригов из GPU+БП+Плата+Охлаждение. Добыча Ежкоинов. Обмен на ЕЖ/Алмазы (комиссия 10%). Поломка 5% за цикл. Электричество за ЕЖ. Макс 5 ригов. Компоненты: GT710→RTX4090.",
+    "миайнбибик": "Сборка ригов из GPU+БП+Плата+Охлаждение. Добыча Ежкоинов. Обмен на ЕЖ/Алмазы (комиссия 10%). Поломка 5% за цикл. Электричество за ЕЖ. Макс 5 ригов. Компоненты: GT710→RTX4090.",
     "домашнее_казино": "Покупка за 300 ЕЖ. Отдельный баланс (Ежедзуки). Те же 5 игр. Продать за 150 ЕЖ.",
     "банк": "3 вклада: По требованию🐾(0.5%/день, без блокировки, от 10), Стабильный🦔(1.2%/день, 24ч блок, от 50), Премиум🏆(2%/день, 72ч блок, от 500). Макс 100к. Штраф 10% за досрочное снятие. Налог 5% на процент.",
     "книги": "Игроки пишут книги с ценой. Админ проверяет. Другие покупают — автор получает оплату.",
@@ -367,7 +367,7 @@ async def ai_tool_get_mining_info(user_id: int) -> str:
         async with db.execute("SELECT COUNT(*) as cnt FROM mining_rigs WHERE user_id = ?", (user_id,)) as cursor:
             rigs_count = (await cursor.fetchone())['cnt']
     if not state or rigs_count == 0:
-        return "Майнинг не настроен. Нужно: купить GPU+БП+Плата, собрать риг. Компоненты от GT710 до RTX4090. Макс 5 ригов."
+        return "МиайнБибик не настроен. Нужно: купить GPU+БП+Плата, собрать риг. Компоненты от GT710 до RTX4090. Макс 5 ригов."
     return f"Ригов: {rigs_count}, Ежкоинов: {state['ezhcoins']:.1f}, Майнит: {'Да' if state['is_mining'] else 'Нет'}, Всего намайнено: {state['total_mined']:.1f}"
 
 
@@ -646,7 +646,7 @@ TOOL_ACTION_LABELS = {
     "get_ants_info": "Считаю муравьёв",
     "get_bank_info": "Проверяю вклады",
     "get_inventory": "Роюсь в инвентаре",
-    "get_mining_info": "Проверяю майнинг",
+    "get_mining_info": "Проверяю миайнбибик",
     "get_referral_info": "Смотрю рефералов",
     "get_section_details": "Читаю справку",
     # Действия — обмен
@@ -1055,7 +1055,7 @@ async def init_db():
             )
         ''')
 
-        # Майнинг: каталог комплектующих
+        # МиайнБибик: каталог комплектующих
         await db.execute('''
             CREATE TABLE IF NOT EXISTS mining_components (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1071,7 +1071,7 @@ async def init_db():
             )
         ''')
 
-        # Майнинг: инвентарь комплектующих игрока
+        # МиайнБибик: инвентарь комплектующих игрока
         await db.execute('''
             CREATE TABLE IF NOT EXISTS mining_inventory (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1084,7 +1084,7 @@ async def init_db():
             )
         ''')
 
-        # Майнинг: риги (собранные установки)
+        # МиайнБибик: риги (собранные установки)
         await db.execute('''
             CREATE TABLE IF NOT EXISTS mining_rigs (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1099,7 +1099,7 @@ async def init_db():
             )
         ''')
 
-        # Майнинг: состояние игрока
+        # МиайнБибик: состояние игрока
         await db.execute('''
             CREATE TABLE IF NOT EXISTS mining_state (
                 user_id INTEGER PRIMARY KEY,
@@ -1198,7 +1198,7 @@ async def init_db():
         for key, value in default_settings:
             await db.execute("INSERT OR IGNORE INTO bot_settings (key, value) VALUES (?, ?)", (key, value))
 
-        # Каталог комплектующих для майнинга
+        # Каталог комплектующих для миайнбибика
         mining_components = [
             # Видеокарты (comp_type='gpu', mh_rate, power_w)
             ("GT 710", "gpu", 500, "balance", 1, 30, 0, 0),
@@ -1816,7 +1816,7 @@ def puzzle_keyboard():
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="🛒 Магазин", callback_data="shop", style=ButtonStyle.SUCCESS)],
         [InlineKeyboardButton(text="⚒️ Кузница", callback_data="forge", style=ButtonStyle.PRIMARY)],
-        [InlineKeyboardButton(text="💻 Майнинг", callback_data="mining", style=ButtonStyle.PRIMARY)],
+        [InlineKeyboardButton(text="💻 МиайнБибик", callback_data="mining", style=ButtonStyle.PRIMARY)],
         [InlineKeyboardButton(text="🎰 Домашнее казино", callback_data="hc_casino", style=ButtonStyle.PRIMARY)],
         [InlineKeyboardButton(text="🧪 Image Test", callback_data="image_test")],
         [InlineKeyboardButton(text="🤖 ИИ-ЕЖ", callback_data="stub_ai")],
@@ -1884,7 +1884,7 @@ def mining_keyboard():
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="🛒 Рынок", callback_data="mining_market", style=ButtonStyle.SUCCESS),
          InlineKeyboardButton(text="🔧 Мой риг", callback_data="mining_rig")],
-        [InlineKeyboardButton(text="⚡ Майнинг", callback_data="mining_dashboard", style=ButtonStyle.PRIMARY),
+        [InlineKeyboardButton(text="⚡ МиайнБибик", callback_data="mining_dashboard", style=ButtonStyle.PRIMARY),
          InlineKeyboardButton(text="💱 Обмен", callback_data="mining_exchange")],
         [InlineKeyboardButton(text="Назад ◀️◀️◀️", callback_data="puzzle")]
     ])
@@ -5911,13 +5911,13 @@ async def forge_inventory_item(callback: CallbackQuery):
 
 
 # =====================================
-# 💻 МАЙНИНГ
+# 💻 МИайнБибик
 # =====================================
 
 # --- Вспомогательные функции ---
 
 async def get_mining_state(user_id: int) -> dict:
-    """Получает или создаёт состояние майнинга игрока."""
+    """Получает или создаёт состояние миайнбибика игрока."""
     async with aiosqlite.connect(DB_NAME) as db:
         db.row_factory = aiosqlite.Row
         async with db.execute("SELECT * FROM mining_state WHERE user_id = ?", (user_id,)) as cursor:
@@ -5931,7 +5931,7 @@ async def get_mining_state(user_id: int) -> dict:
 
 
 async def get_mining_inventory(user_id: int) -> dict:
-    """Возвращает dict {component_id: {quantity, is_broken}} инвентаря майнинга."""
+    """Возвращает dict {component_id: {quantity, is_broken}} инвентаря миайнбибика."""
     async with aiosqlite.connect(DB_NAME) as db:
         db.row_factory = aiosqlite.Row
         async with db.execute(
@@ -6010,7 +6010,7 @@ async def ensure_mining_state(user_id: int):
         await db.commit()
 
 
-# --- ГЛАВНОЕ МЕНЮ МАЙНИНГА ---
+# --- ГЛАВНОЕ МЕНЮ МИайнБибикА ---
 @router.callback_query(F.data == "mining")
 async def mining_menu(callback: CallbackQuery, state: FSMContext):
     await state.clear()
@@ -6022,11 +6022,11 @@ async def mining_menu(callback: CallbackQuery, state: FSMContext):
     rate = await get_ezhcoin_rate()
     
     text = (
-        "💻 **Майнинг**\n\n"
+        "💻 **МиайнБибик**\n\n"
         f"💰 Ежкоины: **{ms['ezhcoins']:.2f}**\n"
         f"📊 Курс: 1 Ежкоин = {rate:.2f} Ежидзиков\n"
         f"🔧 Ригов: {len(rigs)}\n"
-        f"{'🟢 Майнинг активен' if ms['is_mining'] else '🔴 Майнинг остановлен'}\n\n"
+        f"{'🟢 МиайнБибик активен' if ms['is_mining'] else '🔴 МиайнБибик остановлен'}\n\n"
         "Выбери раздел:"
     )
     await safe_edit_text(callback.message, text, reply_markup=mining_keyboard(), parse_mode="Markdown")
@@ -6552,7 +6552,7 @@ async def mining_rig_build_finish(callback: CallbackQuery, state: FSMContext):
     await mining_rig_menu(callback, None)
 
 
-# --- ДАШБОРД МАЙНИНГА ---
+# --- ДАШБОРД МИайнБибикА ---
 @router.callback_query(F.data == "mining_dashboard")
 async def mining_dashboard(callback: CallbackQuery):
     user_id = callback.from_user.id
@@ -6579,7 +6579,7 @@ async def mining_dashboard(callback: CallbackQuery):
     income_per_hour = coin_per_hour * rate
 
     text = (
-        "⚡ **Майнинг — Панель управления**\n\n"
+        "⚡ **МиайнБибик — Панель управления**\n\n"
         f"💰 Ежкоины: **{ms['ezhcoins']:.2f}**\n"
         f"📊 Всего намайнено: {ms['total_mined']:.2f}\n\n"
         f"🔧 Активных ригов: **{len(active_rigs)}/{len(rigs)}**\n"
@@ -6592,11 +6592,11 @@ async def mining_dashboard(callback: CallbackQuery):
     )
 
     if ms['is_mining'] and active_rigs:
-        text += f"\n🟢 **Майнинг работает!**"
+        text += f"\n🟢 **МиайнБибик работает!**"
     elif not active_rigs:
         text += f"\n⚠️ Нет активных ригов!"
     else:
-        text += f"\n🔴 **Майнинг остановлен**"
+        text += f"\n🔴 **МиайнБибик остановлен**"
 
     buttons = []
     if active_rigs:
@@ -11713,7 +11713,7 @@ async def ant_income_loop():
 
 
 async def mining_loop():
-    """Фоновая задача майнинга — раз в час."""
+    """Фоновая задача миайнбибика — раз в час."""
     while True:
         try:
             elec_rate = float(await get_setting("mining_electricity_rate", "1"))
@@ -11760,7 +11760,7 @@ async def mining_loop():
                     async with db.execute("SELECT balance FROM users WHERE user_id = ?", (user_id,)) as cursor:
                         user = await cursor.fetchone()
                     if not user or user['balance'] < elec_cost:
-                        # Не хватает на электричество — останавливаем майнинг
+                        # Не хватает на электричество — останавливаем миайнбибик
                         await db.execute("UPDATE mining_state SET is_mining = 0 WHERE user_id = ?", (user_id,))
                         await db.execute("UPDATE mining_rigs SET is_active = 0 WHERE user_id = ?", (user_id,))
                         continue
@@ -11796,7 +11796,7 @@ async def mining_loop():
                 await db.commit()
 
         except Exception as e:
-            print(f"Ошибка майнинг-цикла: {e}")
+            print(f"Ошибка миайнбибик-цикла: {e}")
         await asyncio.sleep(3600)
 
 
