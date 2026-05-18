@@ -16,7 +16,7 @@ from aiohttp import web
 DB_NAME = os.environ.get("DB_NAME", "hedgehog_bot.db")
 
 # Публичный URL — хост пробрасывает порт 8080 сюда
-PUBLIC_URL = "https://peelllll.apps.apply.build"
+PUBLIC_URL = os.environ.get("PUBLIC_URL", "https://ezikezik.b.jrnm.app")
 
 # =====================================
 # 🎨 КОНСТАНТЫ (как в боте)
