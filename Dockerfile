@@ -20,6 +20,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY Bot.py .
 COPY web.py .
 COPY navalnyy.py .
+COPY gmines.py .
 
 # Копируем базу данных
 COPY hedgehog_bot.db .

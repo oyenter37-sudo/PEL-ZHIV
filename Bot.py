@@ -11499,7 +11499,14 @@ async def main():
             asyncio.create_task(run_navalnyy())
         except Exception as e:
             print(f"⚠️ Бот Навального не запущен: {e}")
-        
+
+        # Запуск Мины Бота параллельно
+        try:
+            from gmines import run_gmines
+            asyncio.create_task(run_gmines())
+        except Exception as e:
+            print(f"⚠️ Мины Бот не запущен: {e}")
+
         # Start web server (non-blocking!)
         try:
             from web import start_web_server
