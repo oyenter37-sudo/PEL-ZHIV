@@ -4,12 +4,15 @@
 # ЧАСТЬ 1: Импорты, настройки, БД, утилиты
 
 import asyncio
+import base64
+import binascii
 import random
 import io
 import os
 import re
 import json
 from datetime import datetime, timedelta
+from functools import lru_cache
 
 import aiosqlite
 from aiogram import Bot, Dispatcher, Router, F
@@ -34,10 +37,103 @@ except ImportError:
     print("⚠️ Библиотека Pillow не найдена. Image Test работать не будет.")
 
 # =====================================
-# ⚙️ НАСТРОЙКИ - ВСТАВЬ СВОЙ ТОКЕН СЮДА
+# ⚙️ НАСТРОЙКИ - ТОКЕН ХРАНИТСЯ В BASE64
 # =====================================
+# Токен лежит в репозитории base64-блобом и превращается в открытый текст
+# только «на лету» — при импорте модуля, т.е. живёт исключительно в памяти
+# процесса. В .py-файле, в диффах и в логах открытого токена нет.
+#
+# ⚠️ base64 — это обфускация, а НЕ шифрование: любой, у кого есть доступ к
+#    файлу, декодирует блоб одной строкой. Поэтому env-переменные имеют
+#    приоритет над вшитым блобом (в порядке убывания важности):
+#      BOT_TOKEN     — токен в открытом тексте (проще всего на хостинге)
+#      BOT_TOKEN_B64 — токен в base64 (если хочется и на хостинге без base64)
+#    Переменные читаются ОДИН раз при старте, наружу не печатаются.
+#
+# Сменил токен у @BotFather → перегенерируй блоб:  python encode_token.py
 
-BOT_TOKEN = "8914077813:AAFE0sh0cGAtwIvw40VYh0tWRGrbgS2Lm7E"
+# --- base64-блоб с токеном: в открытом виде его в файле нет --------------
+_BOT_TOKEN_B64 = (
+    "ODkxNDA3NzgxMzpBQUZFMHNoMGNHQXR3SXZ3NDBWWWgwdFdSR3JiZ1MyTG03"
+    "RQ=="
+)
+
+# Telegram отдаёт токен в формате "<id бота>:<хэш ~35 символов в urlsafe-base64>"
+_BOT_TOKEN_SHAPE = re.compile(r"^\d{1,20}:[A-Za-z0-9_.-]{20,64}$")
+
+
+class BotTokenError(RuntimeError):
+    """Токен не найден / не распарсился — стартовать с этим смысла нет."""
+
+
+def decode_token_b64(blob: str, *, source: str) -> str:
+    """Собирает токен из base64-блоба.
+
+    Терпимо к бытовому копипасту: переносы строк и пробелы игнорируются,
+    urlsafe-алфавит (-_ вместо +/) принимается, недостающий паддинг "="
+    докручивается сам.
+    """
+    data = "".join((blob or "").split()).replace("-", "+").replace("_", "/")
+    if not data:
+        raise BotTokenError(
+            f"{source}: пусто — нечего декодировать. Возьми токен у @BotFather "
+            f"и перегенерируй блоб: python encode_token.py"
+        )
+    data += "=" * (-len(data) % 4)
+    try:
+        token = base64.b64decode(data, validate=True).decode("utf-8").strip()
+    except (binascii.Error, ValueError, UnicodeDecodeError) as exc:
+        raise BotTokenError(f"{source}: не похож на base64 ({exc})") from exc
+    return token
+
+
+# Откуда фактически взяли токен — нужно только для лога при старте
+_BOT_TOKEN_SOURCE = ""
+
+
+@lru_cache(maxsize=1)
+def get_bot_token() -> str:
+    """Токен «на лету»: base64 разворачивается в строку один раз при старте.
+
+    Приоритет: BOT_TOKEN (env) -> BOT_TOKEN_B64 (env) -> _BOT_TOKEN_B64 в этом
+    файле. Результат кэшируется, в лог/вывод токен не попадает никогда.
+    """
+    global _BOT_TOKEN_SOURCE
+    plain = os.environ.get("BOT_TOKEN", "").strip()
+    if plain:
+        token, source = plain, "BOT_TOKEN (env)"
+    else:
+        blob = os.environ.get("BOT_TOKEN_B64", "").strip()
+        if blob:
+            source = "BOT_TOKEN_B64 (env)"
+        else:
+            blob, source = _BOT_TOKEN_B64, "_BOT_TOKEN_B64 (Bot.py)"
+        token = decode_token_b64(blob, source=source)
+
+    if not _BOT_TOKEN_SHAPE.match(token):
+        raise BotTokenError(
+            f"{source}: расшифрованный токен не похож на токен Telegram "
+            f"(длина {len(token)}). Формат: «123456789:AA...» — id бота, "
+            f"двоеточие и хэш из 20-64 символов."
+        )
+    _BOT_TOKEN_SOURCE = source
+    return token
+
+
+def describe_bot_token() -> str:
+    """Описание токена для стартового лога: id бота, хвост хэша и источник.
+
+    Сам токен наружу не печатается никогда — только 4 последних символа, чтобы
+    на проде можно было сверить «тот ли токен подхватился из env».
+    """
+    token = get_bot_token()
+    bot_id, _, hash_ = token.partition(":")
+    return f"id {bot_id} · …{hash_[-4:]} · источник: {_BOT_TOKEN_SOURCE or 'unknown'}"
+
+
+# Открытый текст существует только в памяти процесса
+BOT_TOKEN = get_bot_token()
+
 MAIN_ADMIN_USERNAME = "entergyan"
 CHANNEL_ID = -1002483918
 CHANNEL_LINK = "https://t.me/+hGOqFr0HoQM3Mjgy"
@@ -11517,6 +11613,7 @@ async def main():
         print("=" * 50)
         print(f"👑 Главный админ: @{MAIN_ADMIN_USERNAME}")
         print(f"📢 Канал: {CHANNEL_LINK}")
+        print(f"🔑 Токен: {describe_bot_token()}")
         print("=" * 50)
         
         await dp.start_polling(bot, handle_updates_errors=True)
