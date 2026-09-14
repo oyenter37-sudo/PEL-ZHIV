@@ -38,10 +38,14 @@ except ImportError:
 # =====================================
 
 BOT_TOKEN = "8914077813:AAFE0sh0cGAtwIvw40VYh0tWRGrbgS2Lm7E"
-MAIN_ADMIN_USERNAME = "Nonametipp"
+MAIN_ADMIN_USERNAME = "entergyan"
 CHANNEL_ID = -1002483918
 CHANNEL_LINK = "https://t.me/+hGOqFr0HoQM3Mjgy"
 DB_NAME = os.environ.get("DB_NAME", "hedgehog_bot.db")
+
+# Папка с bundled шрифтами (лежат в репозитории, качать ничего не нужно).
+# Можно подложить свои .ttf сюда же — код ищет шрифты здесь в первую очередь.
+FONT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fonts")
 
 
 # =====================================
@@ -2806,6 +2810,8 @@ def _draw_watermark_tile(image: Image.Image):
     # Загружаем шрифт для водянки
     wm_font = None
     for sf in [
+        os.path.join(FONT_DIR, "DejaVuSans.ttf"),
+        os.path.join(FONT_DIR, "DejaVuSans-Bold.ttf"),
         "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
         "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
         "/usr/share/fonts/truetype/noto-serif-sc/NotoSerifSC-Regular.ttf",
@@ -2895,8 +2901,10 @@ async def image_test_generate(message: Message, state: FSMContext):
 
         draw = ImageDraw.Draw(image)
 
-        # Шрифт с поддержкой кириллицы (DejaVu должен быть установлен в системе)
+        # Шрифт с поддержкой кириллицы (сначала bundled из ./fonts, потом системные)
         font_paths = [
+            os.path.join(FONT_DIR, "DejaVuSans-Bold.ttf"),
+            os.path.join(FONT_DIR, "DejaVuSans.ttf"),
             "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
             "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
             "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
@@ -9872,6 +9880,8 @@ async def _generate_balance_image(user_id: int, user: dict) -> str | None:
     font_value = None
     font_small = None
     for fp in [
+        os.path.join(FONT_DIR, "DejaVuSans-Bold.ttf"),
+        os.path.join(FONT_DIR, "DejaVuSans.ttf"),
         "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
         "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
     ]:
@@ -9957,6 +9967,8 @@ async def _generate_hedgehog_image(user_id: int, user: dict) -> str | None:
     font_value = None
     font_small = None
     for fp in [
+        os.path.join(FONT_DIR, "DejaVuSans-Bold.ttf"),
+        os.path.join(FONT_DIR, "DejaVuSans.ttf"),
         "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
         "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
     ]:

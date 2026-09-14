@@ -2,7 +2,7 @@
 # 🦔 ГОВОРЯЩИЙ ЕЖ - WEB INTERFACE v5 🦔
 # =====================================
 # Веб-интерфейс для Telegram-бота
-# Запускается параллельно с ботом на порту 8080
+# Запускается параллельно с ботом на порту 5000 (переопределяется через env PORT)
 
 import os
 import json
@@ -15,8 +15,11 @@ from aiohttp import web
 
 DB_NAME = os.environ.get("DB_NAME", "hedgehog_bot.db")
 
-# Публичный URL — хост пробрасывает порт 8080 сюда
-PUBLIC_URL = os.environ.get("PUBLIC_URL", "https://ezikezik.b.jrnm.app")
+# Публичный URL — хост пробрасывает порт 5000 сюда
+PUBLIC_URL = os.environ.get("PUBLIC_URL", "https://pel-ezhkgzy.infrlo.com")
+
+# Порт веб-сервера
+PORT = int(os.environ.get("PORT", 5000))
 
 # =====================================
 # 🎨 КОНСТАНТЫ (как в боте)
@@ -1694,6 +1697,6 @@ async def start_web_server():
 
     runner = web.AppRunner(app)
     await runner.setup()
-    site = web.TCPSite(runner, '0.0.0.0', 8080)
+    site = web.TCPSite(runner, '0.0.0.0', PORT)
     await site.start()
-    print(f"🌐 Web-сервер запущен на порту 8080 → {PUBLIC_URL}")
+    print(f"🌐 Web-сервер запущен на порту {PORT} → {PUBLIC_URL}")
