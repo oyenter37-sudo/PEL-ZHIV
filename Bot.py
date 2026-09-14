@@ -2895,7 +2895,7 @@ async def image_test_generate(message: Message, state: FSMContext):
 
         draw = ImageDraw.Draw(image)
 
-        # Шрифт с поддержкой кириллицы (DejaVu — ставится через apt в Dockerfile)
+        # Шрифт с поддержкой кириллицы (DejaVu должен быть установлен в системе)
         font_paths = [
             "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
             "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
@@ -11493,20 +11493,6 @@ async def main():
         asyncio.create_task(bank_interest_loop())
         asyncio.create_task(hunger_loop())
         
-        # Запуск бота Навального параллельно
-        try:
-            from navalnyy import run_navalnyy
-            asyncio.create_task(run_navalnyy())
-        except Exception as e:
-            print(f"⚠️ Бот Навального не запущен: {e}")
-
-        # Запуск Мины Бота параллельно
-        try:
-            from gmines import run_gmines
-            asyncio.create_task(run_gmines())
-        except Exception as e:
-            print(f"⚠️ Мины Бот не запущен: {e}")
-
         # Start web server (non-blocking!)
         try:
             from web import start_web_server
