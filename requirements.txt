@@ -1,5 +1,10 @@
+# Telegram bot
 aiogram==3.27.0
 aiosqlite==0.20.0
-Pillow>=10.4.0
 magic-filter==1.0.12
+
+# Web interface
 aiohttp>=3.9.0
+
+# Image generation used by the bot
+Pillow>=10.4.0
