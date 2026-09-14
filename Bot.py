@@ -34,10 +34,15 @@ except ImportError:
     print("⚠️ Библиотека Pillow не найдена. Image Test работать не будет.")
 
 # =====================================
-# ⚙️ НАСТРОЙКИ - ВСТАВЬ СВОЙ ТОКЕН СЮДА
+# ⚙️ НАСТРОЙКИ - ТОКЕН БЕРЁТСЯ ИЗ ПЕРЕМЕННОЙ ОКРУЖЕНИЯ "BY"
 # =====================================
 
-BOT_TOKEN = "8914077813:AAFE0sh0cGAtwIvw40VYh0tWRGrbgS2Lm7E"
+BOT_TOKEN = os.environ.get("BY")
+if not BOT_TOKEN:
+    raise RuntimeError(
+        "❌ Токен бота не найден! Установите переменную окружения BY, например:\n"
+        "   export BY=\"1234567890:AA...\""
+    )
 MAIN_ADMIN_USERNAME = "entergyan"
 CHANNEL_ID = -1002483918
 CHANNEL_LINK = "https://t.me/+hGOqFr0HoQM3Mjgy"
